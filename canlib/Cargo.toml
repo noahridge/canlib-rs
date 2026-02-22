@@ -1,0 +1,11 @@
+[package]
+name = "canlib"
+version = "0.1.0"
+edition = "2021"
+description = "Safe, idiomatic Rust wrapper for Kvaser CANLib"
+license = "MIT"
+
+[dependencies]
+canlib-sys = { path = "../canlib-sys" }
+bitflags = "2"
+thiserror = "2"

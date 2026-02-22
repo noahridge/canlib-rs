@@ -1,0 +1,9 @@
+[package]
+name = "canlib-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Raw FFI bindings to Kvaser CANLib SDK"
+license = "MIT"
+
+[build-dependencies]
+bindgen = "0.71"

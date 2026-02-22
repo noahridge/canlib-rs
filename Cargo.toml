@@ -1,0 +1,3 @@
+[workspace]
+members = ["canlib-sys", "canlib"]
+resolver = "2"
