@@ -8,9 +8,9 @@ fn main() {
     if let Some(ref sdk) = sdk_dir {
         let lib_dir = if cfg!(target_os = "windows") {
             if cfg!(target_pointer_width = "64") {
-                sdk.join("lib").join("x64")
+                sdk.join("Lib").join("x64")
             } else {
-                sdk.join("lib").join("x86")
+                sdk.join("Lib").join("MS")
             }
         } else {
             sdk.join("lib")
@@ -36,32 +36,43 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let bindings_path = out_path.join("bindings.rs");
 
-    // Try to generate bindings with bindgen if SDK is found
+    // Try to generate bindings with bindgen if SDK is found and libclang is available.
+    // bindgen panics if libclang is missing, so we catch that.
     if let Some(ref inc) = include_dir {
-        let builder = bindgen::Builder::default()
-            .header("wrapper.h")
-            .clang_arg(format!("-I{}", inc.display()))
-            .allowlist_function("can.*")
-            .allowlist_function("kv.*")
-            .allowlist_type("can.*")
-            .allowlist_type("kv.*")
-            .allowlist_var("can.*")
-            .allowlist_var("kv.*")
-            .prepend_enum_name(false)
-            .derive_debug(true)
-            .derive_default(true);
+        let inc_path = inc.display().to_string();
+        let result = std::panic::catch_unwind(|| {
+            bindgen::Builder::default()
+                .header("wrapper.h")
+                .clang_arg(format!("-I{}", inc_path))
+                .allowlist_function("can.*")
+                .allowlist_function("kv.*")
+                .allowlist_type("can.*")
+                .allowlist_type("kv.*")
+                .allowlist_var("can.*")
+                .allowlist_var("kv.*")
+                .prepend_enum_name(false)
+                .derive_debug(true)
+                .derive_default(true)
+                .generate()
+        });
 
-        match builder.generate() {
-            Ok(bindings) => {
+        match result {
+            Ok(Ok(bindings)) => {
                 bindings
                     .write_to_file(&bindings_path)
                     .expect("Failed to write bindings");
                 return;
             }
-            Err(e) => {
-                eprintln!(
-                    "cargo:warning=bindgen failed ({}). Using manual declarations only.",
+            Ok(Err(e)) => {
+                println!(
+                    "cargo:warning=bindgen generation failed: {}. Using manual declarations.",
                     e
+                );
+            }
+            Err(_) => {
+                println!(
+                    "cargo:warning=bindgen panicked (libclang not found?). Using manual declarations. \
+                     Install LLVM/Clang or set LIBCLANG_PATH to enable auto-generated bindings."
                 );
             }
         }
@@ -72,8 +83,11 @@ fn main() {
     }
 
     // Write an empty bindings file — the manual extern blocks in lib.rs provide all needed symbols.
-    std::fs::write(&bindings_path, "// Auto-generated: SDK not found, using manual declarations.\n")
-        .expect("Failed to write empty bindings file");
+    std::fs::write(
+        &bindings_path,
+        "// Auto-generated: bindgen unavailable, using manual declarations.\n",
+    )
+    .expect("Failed to write empty bindings file");
 }
 
 fn find_sdk_dir() -> Option<PathBuf> {
@@ -88,6 +102,8 @@ fn find_sdk_dir() -> Option<PathBuf> {
     // 2. Windows default install location
     if cfg!(target_os = "windows") {
         let candidates = [
+            r"C:\Program Files (x86)\Kvaser\Canlib",
+            r"C:\Program Files\Kvaser\Canlib",
             r"C:\Program Files (x86)\Kvaser\CANlib SDK",
             r"C:\Program Files\Kvaser\CANlib SDK",
         ];
