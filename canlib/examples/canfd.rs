@@ -20,10 +20,10 @@ fn main() -> canlib::Result<()> {
 
     // Send a CAN FD message with BRS (Bit Rate Switch)
     let data: Vec<u8> = (0..24).collect();
-    let msg = CanMessage::new_fd(0x456, &data, true);
+    let msg = CanMessage::new_fd(0x456, &data, true)?;
     ch.write(&msg)?;
     ch.write_sync(Duration::from_secs(1))?;
-    println!("Sent FD message: id=0x{:03X} {} bytes", msg.id, msg.data.len());
+    println!("Sent FD message: id=0x{:03X} {} bytes", msg.id(), msg.data().len());
 
     Ok(())
 }

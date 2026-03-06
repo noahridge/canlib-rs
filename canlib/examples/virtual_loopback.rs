@@ -93,33 +93,33 @@ fn main() -> canlib::Result<()> {
 }
 
 fn test_single_message(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
-    let tx_msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]);
+    let tx_msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF])?;
     sender.write(&tx_msg)?;
     sender.write_sync(TIMEOUT)?;
 
     let rx_msg = receiver.read_wait(TIMEOUT)?;
 
-    println!("  TX: id=0x{:03X} data={:02X?}", tx_msg.id, tx_msg.data);
+    println!("  TX: id=0x{:03X} data={:02X?}", tx_msg.id(), tx_msg.data());
     println!(
         "  RX: id=0x{:03X} data={:02X?} ts={}us",
-        rx_msg.id,
-        rx_msg.data,
-        rx_msg.timestamp.unwrap_or(0)
+        rx_msg.id(),
+        rx_msg.data(),
+        rx_msg.timestamp().unwrap_or(0)
     );
 
-    assert_eq!(rx_msg.id, tx_msg.id, "ID mismatch");
-    assert_eq!(rx_msg.data, tx_msg.data, "Data mismatch");
-    assert_eq!(rx_msg.dlc, tx_msg.dlc, "DLC mismatch");
+    assert_eq!(rx_msg.id(), tx_msg.id(), "ID mismatch");
+    assert_eq!(rx_msg.data(), tx_msg.data(), "Data mismatch");
+    assert_eq!(rx_msg.dlc(), tx_msg.dlc(), "DLC mismatch");
     println!("  PASS");
     Ok(())
 }
 
 fn test_multiple_messages(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
     let messages = vec![
-        CanMessage::new(0x100, &[0x01]),
-        CanMessage::new(0x200, &[0x02, 0x03]),
-        CanMessage::new(0x300, &[0x04, 0x05, 0x06]),
-        CanMessage::new(0x7FF, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]),
+        CanMessage::new(0x100, &[0x01])?,
+        CanMessage::new(0x200, &[0x02, 0x03])?,
+        CanMessage::new(0x300, &[0x04, 0x05, 0x06])?,
+        CanMessage::new(0x7FF, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])?,
     ];
 
     // Send all
@@ -133,17 +133,17 @@ fn test_multiple_messages(sender: &Channel, receiver: &Channel) -> canlib::Resul
         let rx_msg = receiver.read_wait(TIMEOUT)?;
         println!(
             "  [{}] TX: id=0x{:03X} data={:02X?}  ->  RX: id=0x{:03X} data={:02X?}",
-            i, tx_msg.id, tx_msg.data, rx_msg.id, rx_msg.data
+            i, tx_msg.id(), tx_msg.data(), rx_msg.id(), rx_msg.data()
         );
-        assert_eq!(rx_msg.id, tx_msg.id, "ID mismatch at message {}", i);
-        assert_eq!(rx_msg.data, tx_msg.data, "Data mismatch at message {}", i);
+        assert_eq!(rx_msg.id(), tx_msg.id(), "ID mismatch at message {}", i);
+        assert_eq!(rx_msg.data(), tx_msg.data(), "Data mismatch at message {}", i);
     }
     println!("  PASS");
     Ok(())
 }
 
 fn test_extended_message(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
-    let tx_msg = CanMessage::new_extended(0x1ABCDEF, &[0xCA, 0xFE, 0xBA, 0xBE]);
+    let tx_msg = CanMessage::new_extended(0x1ABCDEF, &[0xCA, 0xFE, 0xBA, 0xBE])?;
     sender.write(&tx_msg)?;
     sender.write_sync(TIMEOUT)?;
 
@@ -151,19 +151,19 @@ fn test_extended_message(sender: &Channel, receiver: &Channel) -> canlib::Result
 
     println!(
         "  TX: id=0x{:08X} ext={} data={:02X?}",
-        tx_msg.id,
+        tx_msg.id(),
         tx_msg.is_extended(),
-        tx_msg.data
+        tx_msg.data()
     );
     println!(
         "  RX: id=0x{:08X} ext={} data={:02X?}",
-        rx_msg.id,
+        rx_msg.id(),
         rx_msg.is_extended(),
-        rx_msg.data
+        rx_msg.data()
     );
 
-    assert_eq!(rx_msg.id, tx_msg.id, "ID mismatch");
-    assert_eq!(rx_msg.data, tx_msg.data, "Data mismatch");
+    assert_eq!(rx_msg.id(), tx_msg.id(), "ID mismatch");
+    assert_eq!(rx_msg.data(), tx_msg.data(), "Data mismatch");
     assert!(rx_msg.is_extended(), "Expected extended frame flag");
     println!("  PASS");
     Ok(())
@@ -171,23 +171,23 @@ fn test_extended_message(sender: &Channel, receiver: &Channel) -> canlib::Result
 
 fn test_bidirectional(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
     // sender -> receiver
-    let msg_a = CanMessage::new(0x100, &[0xAA]);
+    let msg_a = CanMessage::new(0x100, &[0xAA])?;
     sender.write(&msg_a)?;
     sender.write_sync(TIMEOUT)?;
 
     let rx_a = receiver.read_wait(TIMEOUT)?;
-    assert_eq!(rx_a.id, 0x100);
-    assert_eq!(rx_a.data, vec![0xAA]);
+    assert_eq!(rx_a.id(), 0x100);
+    assert_eq!(rx_a.data(), &[0xAA]);
     println!("  channel {} -> channel {}: OK", "sender", "receiver");
 
     // receiver -> sender
-    let msg_b = CanMessage::new(0x200, &[0xBB]);
+    let msg_b = CanMessage::new(0x200, &[0xBB])?;
     receiver.write(&msg_b)?;
     receiver.write_sync(TIMEOUT)?;
 
     let rx_b = sender.read_wait(TIMEOUT)?;
-    assert_eq!(rx_b.id, 0x200);
-    assert_eq!(rx_b.data, vec![0xBB]);
+    assert_eq!(rx_b.id(), 0x200);
+    assert_eq!(rx_b.data(), &[0xBB]);
     println!("  channel {} -> channel {}: OK", "receiver", "sender");
 
     println!("  PASS");
@@ -199,7 +199,7 @@ fn test_burst(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
 
     // Send a burst of messages
     for i in 0..count {
-        let msg = CanMessage::new(0x400, &[(i & 0xFF) as u8, ((i >> 8) & 0xFF) as u8]);
+        let msg = CanMessage::new(0x400, &[(i & 0xFF) as u8, ((i >> 8) & 0xFF) as u8])?;
         sender.write(&msg)?;
     }
     sender.write_sync(TIMEOUT)?;
@@ -211,8 +211,8 @@ fn test_burst(sender: &Channel, receiver: &Channel) -> canlib::Result<()> {
             Ok(rx_msg) => {
                 let expected_lo = (received & 0xFF) as u8;
                 let expected_hi = ((received >> 8) & 0xFF) as u8;
-                assert_eq!(rx_msg.data[0], expected_lo, "Data mismatch at msg {}", received);
-                assert_eq!(rx_msg.data[1], expected_hi, "Data mismatch at msg {}", received);
+                assert_eq!(rx_msg.data()[0], expected_lo, "Data mismatch at msg {}", received);
+                assert_eq!(rx_msg.data()[1], expected_hi, "Data mismatch at msg {}", received);
                 received += 1;
             }
             Err(CanError::Timeout) | Err(CanError::NoMsg) => break,

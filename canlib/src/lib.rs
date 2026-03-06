@@ -16,12 +16,12 @@
 //! ch.bus_on().unwrap();
 //!
 //! // Send a message
-//! let msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]);
+//! let msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
 //! ch.write(&msg).unwrap();
 //!
 //! // Receive a message
 //! match ch.read_wait(Duration::from_secs(1)) {
-//!     Ok(rx) => println!("Received: id=0x{:X} data={:?}", rx.id, rx.data),
+//!     Ok(rx) => println!("Received: id=0x{:X} data={:?}", rx.id(), rx.data()),
 //!     Err(canlib::CanError::Timeout) => println!("No message received"),
 //!     Err(e) => eprintln!("Error: {}", e),
 //! }
@@ -36,12 +36,15 @@ pub mod status;
 
 // Re-export primary types at crate root for convenience.
 pub use bus_params::{Bitrate, BusParams, BusParamsTq, DriverType, FdBitrate};
-pub use channel::{Channel, OpenFlags};
+pub use channel::{CanBusControl, CanChannel, CanDiagnostics, CanRead, CanWrite, Channel, OpenFlags};
 pub use error::{CanError, Result};
-pub use message::{CanMessage, MessageFlags};
+pub use message::{CanMessage, MessageFlags, CAN_STD_ID_MAX, CAN_EXT_ID_MAX};
 pub use status::{BusStatistics, BusStatus, ErrorCounters};
 
 use std::sync::Once;
+
+/// Buffer size for channel data string queries and error text lookups.
+const CHANNEL_DATA_BUF_SIZE: usize = 256;
 
 static INIT: Once = Once::new();
 
@@ -86,20 +89,18 @@ pub fn enumerate_channels() -> Result<Vec<ChannelInfo>> {
     let mut channels = Vec::with_capacity(count as usize);
 
     for i in 0..count {
-        let name = get_channel_string(i, canlib_sys::canCHANNELDATA_CHANNEL_NAME)
-            .unwrap_or_default();
-        let desc = get_channel_string(i, canlib_sys::canCHANNELDATA_DEVDESCR_ASCII)
-            .unwrap_or_default();
+        let name = get_channel_string(i, canlib_sys::canCHANNELDATA_CHANNEL_NAME)?;
+        let desc = get_channel_string(i, canlib_sys::canCHANNELDATA_DEVDESCR_ASCII)?;
 
         let mut serial: u64 = 0;
-        let _ = unsafe {
+        error::check_status(unsafe {
             canlib_sys::canGetChannelData(
                 i,
                 canlib_sys::canCHANNELDATA_CARD_SERIAL_NO,
                 &mut serial as *mut u64 as *mut std::os::raw::c_void,
                 std::mem::size_of::<u64>(),
             )
-        };
+        })?;
 
         channels.push(ChannelInfo {
             index: i,
@@ -112,16 +113,10 @@ pub fn enumerate_channels() -> Result<Vec<ChannelInfo>> {
     Ok(channels)
 }
 
-/// Get the error text for a status code.
+/// Get the error text for a status code from the CANLib SDK.
 pub fn get_error_text(err: CanError) -> String {
-    let code = match err {
-        CanError::Unknown(c) => c,
-        _ => {
-            // Reverse-map the error enum to a status code
-            return format!("{}", err);
-        }
-    };
-    let mut buf = [0u8; 256];
+    let code = err.to_status_code();
+    let mut buf = [0u8; CHANNEL_DATA_BUF_SIZE];
     let status = unsafe {
         canlib_sys::canGetErrorText(
             code,
@@ -138,7 +133,7 @@ pub fn get_error_text(err: CanError) -> String {
 }
 
 fn get_channel_string(channel: i32, item: i32) -> Result<String> {
-    let mut buf = [0u8; 256];
+    let mut buf = [0u8; CHANNEL_DATA_BUF_SIZE];
     error::check_status(unsafe {
         canlib_sys::canGetChannelData(
             channel,

@@ -32,6 +32,94 @@ bitflags::bitflags! {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sub-traits
+// ---------------------------------------------------------------------------
+
+/// Bus control operations: on/off, bitrate, and bus parameters.
+pub trait CanBusControl {
+    fn bus_on(&mut self) -> Result<()>;
+    fn bus_off(&mut self) -> Result<()>;
+    fn reset_bus(&mut self) -> Result<()>;
+    fn is_on_bus(&self) -> bool;
+    fn set_bitrate(&self, bitrate: Bitrate) -> Result<()>;
+    fn set_bus_params(&self, params: &BusParams) -> Result<()>;
+}
+
+/// Read operations on a CAN channel.
+pub trait CanRead {
+    fn read(&self) -> Result<CanMessage>;
+    fn read_wait(&self, timeout: Duration) -> Result<CanMessage>;
+    fn read_specific(&self, id: u32) -> Result<CanMessage>;
+    fn read_specific_skip(&self, id: u32) -> Result<CanMessage>;
+}
+
+/// Write operations on a CAN channel.
+pub trait CanWrite {
+    fn write(&self, msg: &CanMessage) -> Result<()>;
+    fn write_wait(&self, msg: &CanMessage, timeout: Duration) -> Result<()>;
+    fn write_sync(&self, timeout: Duration) -> Result<()>;
+}
+
+/// Diagnostics: filters, status, error counters, and queue flushing.
+pub trait CanDiagnostics {
+    fn set_acceptance_filter(&self, code: u32, mask: u32, extended: bool) -> Result<()>;
+    fn read_status(&self) -> Result<BusStatus>;
+    fn read_error_counters(&self) -> Result<ErrorCounters>;
+    fn flush_rx(&self) -> Result<()>;
+    fn flush_tx(&self) -> Result<()>;
+}
+
+/// Combined trait encompassing all CAN channel operations.
+pub trait CanChannel: CanBusControl + CanRead + CanWrite + CanDiagnostics {}
+
+// Blanket impl: anything that implements all four sub-traits is a CanChannel.
+impl<T: CanBusControl + CanRead + CanWrite + CanDiagnostics> CanChannel for T {}
+
+// ---------------------------------------------------------------------------
+// Delegation macro
+// ---------------------------------------------------------------------------
+
+/// Generate trait implementations for all four CAN sub-traits by delegating
+/// to inherent methods of the same name on `$type`.
+macro_rules! impl_can_channel {
+    ($type:ty) => {
+        impl CanBusControl for $type {
+            fn bus_on(&mut self) -> Result<()> { <$type>::bus_on(self) }
+            fn bus_off(&mut self) -> Result<()> { <$type>::bus_off(self) }
+            fn reset_bus(&mut self) -> Result<()> { <$type>::reset_bus(self) }
+            fn is_on_bus(&self) -> bool { <$type>::is_on_bus(self) }
+            fn set_bitrate(&self, bitrate: Bitrate) -> Result<()> { <$type>::set_bitrate(self, bitrate) }
+            fn set_bus_params(&self, params: &BusParams) -> Result<()> { <$type>::set_bus_params(self, params) }
+        }
+
+        impl CanRead for $type {
+            fn read(&self) -> Result<CanMessage> { <$type>::read(self) }
+            fn read_wait(&self, timeout: Duration) -> Result<CanMessage> { <$type>::read_wait(self, timeout) }
+            fn read_specific(&self, id: u32) -> Result<CanMessage> { <$type>::read_specific(self, id) }
+            fn read_specific_skip(&self, id: u32) -> Result<CanMessage> { <$type>::read_specific_skip(self, id) }
+        }
+
+        impl CanWrite for $type {
+            fn write(&self, msg: &CanMessage) -> Result<()> { <$type>::write(self, msg) }
+            fn write_wait(&self, msg: &CanMessage, timeout: Duration) -> Result<()> { <$type>::write_wait(self, msg, timeout) }
+            fn write_sync(&self, timeout: Duration) -> Result<()> { <$type>::write_sync(self, timeout) }
+        }
+
+        impl CanDiagnostics for $type {
+            fn set_acceptance_filter(&self, code: u32, mask: u32, extended: bool) -> Result<()> { <$type>::set_acceptance_filter(self, code, mask, extended) }
+            fn read_status(&self) -> Result<BusStatus> { <$type>::read_status(self) }
+            fn read_error_counters(&self) -> Result<ErrorCounters> { <$type>::read_error_counters(self) }
+            fn flush_rx(&self) -> Result<()> { <$type>::flush_rx(self) }
+            fn flush_tx(&self) -> Result<()> { <$type>::flush_tx(self) }
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Channel (hardware-backed)
+// ---------------------------------------------------------------------------
+
 /// A handle to an open CAN channel.
 ///
 /// The channel is automatically taken off-bus and closed when dropped.
@@ -103,12 +191,12 @@ impl Channel {
         check_status(unsafe {
             sys::canSetBusParams(
                 self.handle,
-                params.freq as std::os::raw::c_long,
-                params.tseg1,
-                params.tseg2,
-                params.sjw,
-                params.no_samp,
-                params.sync_mode,
+                params.freq() as std::os::raw::c_long,
+                params.tseg1(),
+                params.tseg2(),
+                params.sjw(),
+                params.no_samp(),
+                params.sync_mode(),
             )
         })
     }
@@ -167,14 +255,7 @@ impl Channel {
                 &mut sync_mode,
             )
         })?;
-        Ok(BusParams {
-            freq: freq as i64,
-            tseg1,
-            tseg2,
-            sjw,
-            no_samp,
-            sync_mode,
-        })
+        Ok(BusParams::from_raw(freq as i64, tseg1, tseg2, sjw, no_samp, sync_mode))
     }
 
     /// Get bus parameters in time quanta format.
@@ -203,16 +284,17 @@ impl Channel {
     /// Send a CAN message.
     pub fn write(&self, msg: &CanMessage) -> Result<()> {
         let mut data = [0u8; CANFD_MAX_DLC];
-        let len = msg.data.len().min(CANFD_MAX_DLC);
-        data[..len].copy_from_slice(&msg.data[..len]);
+        let src = msg.data();
+        let len = src.len().min(CANFD_MAX_DLC);
+        data[..len].copy_from_slice(&src[..len]);
 
         check_status(unsafe {
             sys::canWrite(
                 self.handle,
-                msg.id as std::os::raw::c_long,
+                msg.id() as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
-                msg.dlc as u32,
-                msg.flags.bits(),
+                msg.dlc() as u32,
+                msg.flags().bits(),
             )
         })
     }
@@ -220,16 +302,17 @@ impl Channel {
     /// Send a CAN message and wait for it to be transmitted.
     pub fn write_wait(&self, msg: &CanMessage, timeout: Duration) -> Result<()> {
         let mut data = [0u8; CANFD_MAX_DLC];
-        let len = msg.data.len().min(CANFD_MAX_DLC);
-        data[..len].copy_from_slice(&msg.data[..len]);
+        let src = msg.data();
+        let len = src.len().min(CANFD_MAX_DLC);
+        data[..len].copy_from_slice(&src[..len]);
 
         check_status(unsafe {
             sys::canWriteWait(
                 self.handle,
-                msg.id as std::os::raw::c_long,
+                msg.id() as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
-                msg.dlc as u32,
-                msg.flags.bits(),
+                msg.dlc() as u32,
+                msg.flags().bits(),
                 timeout.as_millis() as std::os::raw::c_ulong,
             )
         })
@@ -266,13 +349,13 @@ impl Channel {
         })?;
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
-        Ok(CanMessage {
-            id: id as u32,
-            data: data[..data_len].to_vec(),
-            dlc: dlc as u8,
-            flags: MessageFlags::from_bits_truncate(flags),
-            timestamp: Some(timestamp as u64),
-        })
+        Ok(CanMessage::from_raw(
+            id as u32,
+            data[..data_len].to_vec(),
+            dlc as u8,
+            MessageFlags::from_bits_truncate(flags),
+            timestamp as u64,
+        ))
     }
 
     /// Read a message with a timeout.
@@ -298,13 +381,13 @@ impl Channel {
         })?;
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
-        Ok(CanMessage {
-            id: id as u32,
-            data: data[..data_len].to_vec(),
-            dlc: dlc as u8,
-            flags: MessageFlags::from_bits_truncate(flags),
-            timestamp: Some(timestamp as u64),
-        })
+        Ok(CanMessage::from_raw(
+            id as u32,
+            data[..data_len].to_vec(),
+            dlc as u8,
+            MessageFlags::from_bits_truncate(flags),
+            timestamp as u64,
+        ))
     }
 
     /// Wait until a message is available or the timeout expires.
@@ -337,13 +420,13 @@ impl Channel {
         })?;
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
-        Ok(CanMessage {
+        Ok(CanMessage::from_raw(
             id,
-            data: data[..data_len].to_vec(),
-            dlc: dlc as u8,
-            flags: MessageFlags::from_bits_truncate(flags),
-            timestamp: Some(timestamp as u64),
-        })
+            data[..data_len].to_vec(),
+            dlc as u8,
+            MessageFlags::from_bits_truncate(flags),
+            timestamp as u64,
+        ))
     }
 
     /// Read a message with a specific ID, discarding non-matching messages.
@@ -365,13 +448,13 @@ impl Channel {
         })?;
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
-        Ok(CanMessage {
+        Ok(CanMessage::from_raw(
             id,
-            data: data[..data_len].to_vec(),
-            dlc: dlc as u8,
-            flags: MessageFlags::from_bits_truncate(flags),
-            timestamp: Some(timestamp as u64),
-        })
+            data[..data_len].to_vec(),
+            dlc as u8,
+            MessageFlags::from_bits_truncate(flags),
+            timestamp as u64,
+        ))
     }
 
     // ---- Acceptance filters ----
@@ -449,6 +532,8 @@ impl Channel {
     }
 }
 
+impl_can_channel!(Channel);
+
 impl Drop for Channel {
     fn drop(&mut self) {
         if self.on_bus {
@@ -458,6 +543,176 @@ impl Drop for Channel {
         }
         unsafe {
             sys::canClose(self.handle);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MockChannel (test only)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) mod mock {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    /// A mock CAN channel for unit testing.
+    pub struct MockChannel {
+        on_bus: bool,
+        rx_queue: RefCell<VecDeque<CanMessage>>,
+        tx_log: RefCell<Vec<CanMessage>>,
+    }
+
+    impl MockChannel {
+        pub fn new() -> Self {
+            Self {
+                on_bus: false,
+                rx_queue: RefCell::new(VecDeque::new()),
+                tx_log: RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Enqueue a message that will be returned by the next `read`.
+        pub fn push_rx(&self, msg: CanMessage) {
+            self.rx_queue.borrow_mut().push_back(msg);
+        }
+
+        /// Take all transmitted messages out of the log.
+        pub fn take_tx_log(&self) -> Vec<CanMessage> {
+            self.tx_log.borrow_mut().drain(..).collect()
+        }
+    }
+
+    impl CanBusControl for MockChannel {
+        fn bus_on(&mut self) -> Result<()> {
+            self.on_bus = true;
+            Ok(())
+        }
+        fn bus_off(&mut self) -> Result<()> {
+            self.on_bus = false;
+            Ok(())
+        }
+        fn reset_bus(&mut self) -> Result<()> {
+            self.on_bus = false;
+            Ok(())
+        }
+        fn is_on_bus(&self) -> bool {
+            self.on_bus
+        }
+        fn set_bitrate(&self, _bitrate: Bitrate) -> Result<()> {
+            Ok(())
+        }
+        fn set_bus_params(&self, _params: &BusParams) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CanRead for MockChannel {
+        fn read(&self) -> Result<CanMessage> {
+            self.rx_queue
+                .borrow_mut()
+                .pop_front()
+                .ok_or(CanError::NoMsg)
+        }
+        fn read_wait(&self, _timeout: Duration) -> Result<CanMessage> {
+            self.read()
+        }
+        fn read_specific(&self, id: u32) -> Result<CanMessage> {
+            let mut q = self.rx_queue.borrow_mut();
+            let pos = q.iter().position(|m| m.id() == id);
+            match pos {
+                Some(i) => Ok(q.remove(i).unwrap()),
+                None => Err(CanError::NoMsg),
+            }
+        }
+        fn read_specific_skip(&self, id: u32) -> Result<CanMessage> {
+            self.read_specific(id)
+        }
+    }
+
+    impl CanWrite for MockChannel {
+        fn write(&self, msg: &CanMessage) -> Result<()> {
+            self.tx_log.borrow_mut().push(msg.clone());
+            Ok(())
+        }
+        fn write_wait(&self, msg: &CanMessage, _timeout: Duration) -> Result<()> {
+            self.write(msg)
+        }
+        fn write_sync(&self, _timeout: Duration) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CanDiagnostics for MockChannel {
+        fn set_acceptance_filter(&self, _code: u32, _mask: u32, _extended: bool) -> Result<()> {
+            Ok(())
+        }
+        fn read_status(&self) -> Result<BusStatus> {
+            Ok(BusStatus::empty())
+        }
+        fn read_error_counters(&self) -> Result<ErrorCounters> {
+            Ok(ErrorCounters::default())
+        }
+        fn flush_rx(&self) -> Result<()> {
+            self.rx_queue.borrow_mut().clear();
+            Ok(())
+        }
+        fn flush_tx(&self) -> Result<()> {
+            self.tx_log.borrow_mut().clear();
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::message::MessageFlags;
+
+        #[test]
+        fn bus_on_off_state() {
+            let mut mock = MockChannel::new();
+            assert!(!mock.is_on_bus());
+            mock.bus_on().unwrap();
+            assert!(mock.is_on_bus());
+            mock.bus_off().unwrap();
+            assert!(!mock.is_on_bus());
+        }
+
+        #[test]
+        fn write_captures_to_tx_log() {
+            let mock = MockChannel::new();
+            let msg = CanMessage::new(0x100, &[1, 2, 3]).unwrap();
+            CanWrite::write(&mock, &msg).unwrap();
+            let log = mock.take_tx_log();
+            assert_eq!(log.len(), 1);
+            assert_eq!(log[0].id(), 0x100);
+            assert_eq!(log[0].data(), &[1, 2, 3]);
+        }
+
+        #[test]
+        fn read_returns_enqueued_messages() {
+            let mock = MockChannel::new();
+            let msg = CanMessage::from_raw(0x200, vec![0xAA], 1, MessageFlags::STD, 1000);
+            mock.push_rx(msg);
+            let rx = CanRead::read(&mock).unwrap();
+            assert_eq!(rx.id(), 0x200);
+            assert_eq!(rx.data(), &[0xAA]);
+        }
+
+        #[test]
+        fn empty_read_returns_no_msg() {
+            let mock = MockChannel::new();
+            let err = CanRead::read(&mock).unwrap_err();
+            assert_eq!(err, CanError::NoMsg);
+        }
+
+        #[test]
+        fn dyn_can_channel_acceptance() {
+            let mut mock = MockChannel::new();
+            let ch: &mut dyn CanChannel = &mut mock;
+            ch.bus_on().unwrap();
+            assert!(ch.is_on_bus());
         }
     }
 }

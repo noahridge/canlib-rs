@@ -69,3 +69,64 @@ impl BusStatistics {
         self.bus_load as f64 / 100.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bus_load_percent_computes_correctly() {
+        let stats = BusStatistics {
+            bus_load: 5000,
+            ..Default::default()
+        };
+        assert!((stats.bus_load_percent() - 50.0).abs() < f64::EPSILON);
+
+        let stats_zero = BusStatistics::default();
+        assert!((stats_zero.bus_load_percent() - 0.0).abs() < f64::EPSILON);
+
+        let stats_full = BusStatistics {
+            bus_load: 10000,
+            ..Default::default()
+        };
+        assert!((stats_full.bus_load_percent() - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn bus_statistics_from_raw() {
+        let raw = sys::canBusStatistics {
+            stdData: 10,
+            stdRemote: 20,
+            extData: 30,
+            extRemote: 40,
+            errFrame: 5,
+            busLoad: 1234,
+            overruns: 2,
+        };
+        let stats = BusStatistics::from_raw(&raw);
+        assert_eq!(stats.std_data, 10);
+        assert_eq!(stats.std_remote, 20);
+        assert_eq!(stats.ext_data, 30);
+        assert_eq!(stats.ext_remote, 40);
+        assert_eq!(stats.err_frames, 5);
+        assert_eq!(stats.bus_load, 1234);
+        assert_eq!(stats.overruns, 2);
+    }
+
+    #[test]
+    fn bus_status_flag_composition() {
+        let status = BusStatus::ERROR_ACTIVE | BusStatus::TX_PENDING;
+        assert!(status.contains(BusStatus::ERROR_ACTIVE));
+        assert!(status.contains(BusStatus::TX_PENDING));
+        assert!(!status.contains(BusStatus::BUS_OFF));
+        assert!(!status.contains(BusStatus::OVERRUN));
+    }
+
+    #[test]
+    fn error_counters_default() {
+        let ec = ErrorCounters::default();
+        assert_eq!(ec.tx_errors, 0);
+        assert_eq!(ec.rx_errors, 0);
+        assert_eq!(ec.overrun_errors, 0);
+    }
+}

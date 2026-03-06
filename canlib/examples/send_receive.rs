@@ -19,10 +19,10 @@ fn main() -> canlib::Result<()> {
     println!("On bus. Sending test message...");
 
     // Send a message
-    let msg = CanMessage::new(0x123, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    let msg = CanMessage::new(0x123, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])?;
     ch.write(&msg)?;
     ch.write_sync(Duration::from_secs(1))?;
-    println!("Sent: id=0x{:03X} data={:02X?}", msg.id, msg.data);
+    println!("Sent: id=0x{:03X} data={:02X?}", msg.id(), msg.data());
 
     // Try to receive messages for 5 seconds
     println!("Listening for messages (5 seconds)...");
@@ -33,11 +33,11 @@ fn main() -> canlib::Result<()> {
             Ok(rx) => {
                 println!(
                     "  Received: id=0x{:03X} dlc={} data={:02X?} flags={:?} ts={}us",
-                    rx.id,
-                    rx.dlc,
-                    rx.data,
-                    rx.flags,
-                    rx.timestamp.unwrap_or(0),
+                    rx.id(),
+                    rx.dlc(),
+                    rx.data(),
+                    rx.flags(),
+                    rx.timestamp().unwrap_or(0),
                 );
             }
             Err(CanError::Timeout) => continue,
