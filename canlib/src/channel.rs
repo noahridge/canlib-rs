@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use canlib_sys as sys;
 
-use crate::bus_params::{Bitrate, BusParams, BusParamsTq, DriverType};
+use crate::bus_params::{Bitrate, BusParams, BusParamsTq, DriverType, FdBitrate};
 use crate::error::{check_handle, check_status, CanError, Result};
 use crate::message::{CanMessage, MessageFlags, CANFD_MAX_DLC};
 use crate::status::{BusStatistics, BusStatus, ErrorCounters};
@@ -204,6 +204,13 @@ impl Channel {
     /// Set bus parameters using time quanta.
     pub fn set_bus_params_tq(&self, params: &BusParamsTq) -> Result<()> {
         check_status(unsafe { sys::canSetBusParamsTq(self.handle, params.to_raw()) })
+    }
+
+    /// Set the CAN FD data-phase bitrate using a predefined constant.
+    pub fn set_fd_bitrate(&self, bitrate: FdBitrate) -> Result<()> {
+        check_status(unsafe {
+            sys::canSetBusParamsFd(self.handle, bitrate.to_raw(), 0, 0, 0)
+        })
     }
 
     /// Set CAN FD data-phase bus parameters.

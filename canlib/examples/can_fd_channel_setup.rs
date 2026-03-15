@@ -56,32 +56,32 @@ fn main() -> canlib::Result<()> {
     //     frame). Configured with set_bus_params_fd() or by passing a
     //     predefined FdBitrate constant.
     //
-    // Option A – predefined FdBitrate enum (simplest):
-    //   Passing FdBitrate::Rate2M80P.to_raw() as the freq_brs argument lets
-    //   the driver pick matching tseg1/tseg2/sjw automatically (same behaviour
-    //   as Bitrate for classic CAN).
+    // Option A – predefined FdBitrate enum via set_fd_bitrate() (simplest):
+    //   Mirrors set_bitrate() for classic CAN; the driver resolves timing
+    //   values automatically.
     //
-    // Option B – explicit timing values (shown in the commented block below):
+    // Option B – explicit timing values:
     //   set_bus_params_fd(freq_hz, tseg1, tseg2, sjw)
-    //   Use this when you need a non-standard configuration.
+    //   Use when you need a non-standard configuration.
     //
     // Option C – time-quanta format:
     //   set_bus_params_fd_tq(&arb_tq, &data_tq)
-    //   Gives full control over both phases in one call (see commented block).
+    //   Full control over both phases in one call.
     // -----------------------------------------------------------------------
     for ch in [&sender, &receiver] {
         // Arbitration phase
         ch.set_bitrate(ARB_BITRATE)?;
 
         // Data phase – Option A: predefined FdBitrate constant
-        ch.set_bus_params_fd(DATA_BITRATE.to_raw() as i64, 0, 0, 0)?;
+        ch.set_fd_bitrate(DATA_BITRATE)?;
 
         // Data phase – Option B (uncomment to use instead):
         // ch.set_bus_params_fd(2_000_000, 5, 2, 1)?;
 
         // Data phase – Option C (uncomment to use instead):
-        // let arb_tq  = BusParamsTq::new(/* tq */ 80, /* phase1 */ 63, /* phase2 */ 16, /* sjw */ 16, /* prop */ 0, /* prescaler */ 1);
-        // let data_tq = BusParamsTq::new(/* tq */ 20, /* phase1 */ 15, /* phase2 */  4, /* sjw */  4, /* prop */ 0, /* prescaler */ 1);
+        // use canlib::BusParamsTq;
+        // let arb_tq  = BusParamsTq::new(80, 63, 16, 16, 0, 1);
+        // let data_tq = BusParamsTq::new(20, 15,  4,  4, 0, 1);
         // ch.set_bus_params_fd_tq(&arb_tq, &data_tq)?;
 
         ch.set_output_control(DriverType::Normal)?;
