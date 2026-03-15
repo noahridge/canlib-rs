@@ -1,7 +1,7 @@
 //! List all available CAN channels.
 
 fn main() {
-    let (major, minor) = canlib::get_version();
+    let (major, minor) = canlib::get_version().expect("Failed to load CANLib");
     println!("CANLib version: {}.{}", major, minor);
 
     match canlib::enumerate_channels() {

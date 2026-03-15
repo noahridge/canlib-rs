@@ -4,26 +4,6 @@ use std::path::PathBuf;
 fn main() {
     let sdk_dir = find_sdk_dir();
 
-    // Tell cargo to link against canlib
-    if let Some(ref sdk) = sdk_dir {
-        let lib_dir = if cfg!(target_os = "windows") {
-            if cfg!(target_pointer_width = "64") {
-                sdk.join("Lib").join("x64")
-            } else {
-                sdk.join("Lib").join("MS")
-            }
-        } else {
-            sdk.join("lib")
-        };
-        println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    }
-
-    if cfg!(target_os = "windows") {
-        println!("cargo:rustc-link-lib=canlib32");
-    } else {
-        println!("cargo:rustc-link-lib=canlib");
-    }
-
     // Determine include path
     let include_dir = sdk_dir.as_ref().map(|sdk| {
         if cfg!(target_os = "windows") {
@@ -82,7 +62,7 @@ fn main() {
         );
     }
 
-    // Write an empty bindings file — the manual extern blocks in lib.rs provide all needed symbols.
+    // Write an empty bindings file — the manual declarations in lib.rs provide all needed symbols.
     std::fs::write(
         &bindings_path,
         "// Auto-generated: bindgen unavailable, using manual declarations.\n",

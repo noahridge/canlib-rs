@@ -49,24 +49,28 @@ const CHANNEL_DATA_BUF_SIZE: usize = 256;
 static INIT: Once = Once::new();
 
 /// Ensure the CANLib library is initialized. Called automatically by [`Channel::open`].
-pub fn ensure_initialized() {
+pub fn ensure_initialized() -> Result<()> {
+    let lib = error::lib()?;
     INIT.call_once(|| unsafe {
-        canlib_sys::canInitializeLibrary();
+        (lib.canInitializeLibrary)();
     });
+    Ok(())
 }
 
 /// Get the CANLib version as a (major, minor) tuple.
-pub fn get_version() -> (u8, u8) {
-    ensure_initialized();
-    let v = unsafe { canlib_sys::canGetVersion() };
-    ((v >> 8) as u8, (v & 0xFF) as u8)
+pub fn get_version() -> Result<(u8, u8)> {
+    ensure_initialized()?;
+    let lib = error::lib()?;
+    let v = unsafe { (lib.canGetVersion)() };
+    Ok(((v >> 8) as u8, (v & 0xFF) as u8))
 }
 
 /// Get the number of available CAN channels.
 pub fn get_number_of_channels() -> Result<i32> {
-    ensure_initialized();
+    ensure_initialized()?;
+    let lib = error::lib()?;
     let mut count: i32 = 0;
-    error::check_status(unsafe { canlib_sys::canGetNumberOfChannels(&mut count) })?;
+    error::check_status(unsafe { (lib.canGetNumberOfChannels)(&mut count) })?;
     Ok(count)
 }
 
@@ -92,9 +96,10 @@ pub fn enumerate_channels() -> Result<Vec<ChannelInfo>> {
         let name = get_channel_string(i, canlib_sys::canCHANNELDATA_CHANNEL_NAME)?;
         let desc = get_channel_string(i, canlib_sys::canCHANNELDATA_DEVDESCR_ASCII)?;
 
+        let lib = error::lib()?;
         let mut serial: u64 = 0;
         error::check_status(unsafe {
-            canlib_sys::canGetChannelData(
+            (lib.canGetChannelData)(
                 i,
                 canlib_sys::canCHANNELDATA_CARD_SERIAL_NO,
                 &mut serial as *mut u64 as *mut std::os::raw::c_void,
@@ -116,9 +121,13 @@ pub fn enumerate_channels() -> Result<Vec<ChannelInfo>> {
 /// Get the error text for a status code from the CANLib SDK.
 pub fn get_error_text(err: CanError) -> String {
     let code = err.to_status_code();
+    let lib = match error::lib() {
+        Ok(lib) => lib,
+        Err(_) => return format!("Unknown error ({})", code),
+    };
     let mut buf = [0u8; CHANNEL_DATA_BUF_SIZE];
     let status = unsafe {
-        canlib_sys::canGetErrorText(
+        (lib.canGetErrorText)(
             code,
             buf.as_mut_ptr() as *mut std::os::raw::c_char,
             buf.len() as u32,
@@ -133,9 +142,10 @@ pub fn get_error_text(err: CanError) -> String {
 }
 
 fn get_channel_string(channel: i32, item: i32) -> Result<String> {
+    let lib = error::lib()?;
     let mut buf = [0u8; CHANNEL_DATA_BUF_SIZE];
     error::check_status(unsafe {
-        canlib_sys::canGetChannelData(
+        (lib.canGetChannelData)(
             channel,
             item,
             buf.as_mut_ptr() as *mut std::os::raw::c_void,
