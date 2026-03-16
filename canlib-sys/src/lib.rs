@@ -8,8 +8,6 @@
 #![allow(non_snake_case)]
 #![allow(clippy::all)]
 
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
 // Re-export commonly used types for convenience
 pub type canHandle = ::std::os::raw::c_int;
 pub type canStatus = ::std::os::raw::c_int;
