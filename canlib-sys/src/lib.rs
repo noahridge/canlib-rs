@@ -449,8 +449,25 @@ impl CanLib {
     /// The loaded library must be a genuine Kvaser CANLib implementation with
     /// the expected ABI. This is satisfied by the official SDK installation.
     pub unsafe fn load() -> Result<Self, LoadError> {
-        let lib =
-            libloading::Library::new(LIB_NAME).map_err(LoadError::LibraryNotFound)?;
+        // If CANLIB_SDK_DIR is set, try loading from that directory first.
+        let lib = if let Ok(dir) = std::env::var("CANLIB_SDK_DIR") {
+            let mut path = std::path::PathBuf::from(&dir);
+            if cfg!(target_os = "windows") {
+                if cfg!(target_pointer_width = "64") {
+                    path.push("Bin");
+                } else {
+                    path.push("Bin");
+                }
+            } else {
+                path.push("lib");
+            }
+            path.push(LIB_NAME);
+            libloading::Library::new(&path)
+                .or_else(|_| libloading::Library::new(LIB_NAME))
+                .map_err(LoadError::LibraryNotFound)?
+        } else {
+            libloading::Library::new(LIB_NAME).map_err(LoadError::LibraryNotFound)?
+        };
 
         Ok(Self {
             canInitializeLibrary: load_sym!(lib, "canInitializeLibrary"),
