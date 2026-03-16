@@ -28,7 +28,7 @@ const DATA_BITRATE: FdBitrate = FdBitrate::Rate2M80P;
 const RX_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn main() -> canlib::Result<()> {
-    let (major, minor) = canlib::get_version();
+    let (major, minor) = canlib::get_version()?;
     println!("CANlib version: {}.{}", major, minor);
 
     // -----------------------------------------------------------------------

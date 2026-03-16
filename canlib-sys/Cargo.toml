@@ -5,5 +5,8 @@ edition = "2021"
 description = "Raw FFI bindings to Kvaser CANLib SDK"
 license = "MIT"
 
+[dependencies]
+libloading = "0.8"
+
 [build-dependencies]
 bindgen = "0.71"

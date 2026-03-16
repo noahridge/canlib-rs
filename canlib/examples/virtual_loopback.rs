@@ -16,7 +16,7 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 
 fn main() -> canlib::Result<()> {
     // Print library info
-    let (major, minor) = canlib::get_version();
+    let (major, minor) = canlib::get_version()?;
     println!("CANLib version: {}.{}", major, minor);
 
     // List available channels so we can find the virtual ones

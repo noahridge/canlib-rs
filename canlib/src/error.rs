@@ -4,8 +4,10 @@ use canlib_sys as sys;
 pub type Result<T> = std::result::Result<T, CanError>;
 
 /// Error type representing all CANLib status codes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CanError {
+    #[error("CANLib library not loaded: {0}")]
+    LibraryNotLoaded(String),
     #[error("invalid parameter")]
     Param,
     #[error("no message available")]
@@ -84,6 +86,7 @@ impl CanError {
     /// Convert this `CanError` back to the corresponding raw `canStatus` code.
     pub fn to_status_code(&self) -> sys::canStatus {
         match self {
+            CanError::LibraryNotLoaded(_) => sys::canERR_DYNALIB,
             CanError::Param => sys::canERR_PARAM,
             CanError::NoMsg => sys::canERR_NOMSG,
             CanError::NotFound => sys::canERR_NOTFOUND,
@@ -182,6 +185,11 @@ pub(crate) fn check_handle(status: sys::canStatus) -> Result<sys::canHandle> {
     } else {
         Err(CanError::from_status(status))
     }
+}
+
+/// Get a reference to the loaded CANLib, or return a `CanError::LibraryNotLoaded`.
+pub(crate) fn lib() -> Result<&'static sys::CanLib> {
+    sys::get().map_err(|e| CanError::LibraryNotLoaded(e.to_string()))
 }
 
 #[cfg(test)]
