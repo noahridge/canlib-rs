@@ -104,26 +104,27 @@ fn main() -> canlib::Result<()> {
     // -----------------------------------------------------------------------
     // Step 4: Send and receive CAN FD frames.
     //
-    // CanMessage::new_fd(id, data, brs)
-    //   id   – 29-bit extended CAN ID
-    //   data – payload slice; up to 64 bytes for CAN FD
-    //   brs  – Bit Rate Switch: true  → data phase runs at DATA_BITRATE
-    //                           false → entire frame uses ARB_BITRATE
+    // CanMessage::new_fd(id, data, brs, extended)
+    //   id       – CAN ID (11-bit standard or 29-bit extended)
+    //   data     – payload slice; up to 64 bytes for CAN FD
+    //   brs      – Bit Rate Switch: true  → data phase runs at DATA_BITRATE
+    //                                false → entire frame uses ARB_BITRATE
+    //   extended – true for 29-bit extended ID, false for 11-bit standard ID
     // -----------------------------------------------------------------------
 
-    // 4a. Short FD frame (8 bytes) without BRS
-    let msg_8 = CanMessage::new_fd(0x100, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], false)?;
+    // 4a. Short FD frame (8 bytes) without BRS, standard ID
+    let msg_8 = CanMessage::new_fd(0x100, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], false, false)?;
     send_and_receive(&sender, &receiver, &msg_8, "8-byte FD, no BRS")?;
 
     // 4b. Medium FD frame (32 bytes) with BRS – data phase at 2 Mbit/s
     let data_32: Vec<u8> = (0u8..32).collect();
-    let msg_32 = CanMessage::new_fd(0x200, &data_32, true)?;
+    let msg_32 = CanMessage::new_fd(0x200, &data_32, true, false)?;
     send_and_receive(&sender, &receiver, &msg_32, "32-byte FD, BRS")?;
 
-    // 4c. Maximum FD frame (64 bytes) with BRS
+    // 4c. Maximum FD frame (64 bytes) with BRS, extended ID
     let data_64: Vec<u8> = (0u8..64).collect();
-    let msg_64 = CanMessage::new_fd(0x300, &data_64, true)?;
-    send_and_receive(&sender, &receiver, &msg_64, "64-byte FD, BRS")?;
+    let msg_64 = CanMessage::new_fd(0x1ABC_0300, &data_64, true, true)?;
+    send_and_receive(&sender, &receiver, &msg_64, "64-byte FD, BRS, extended ID")?;
 
     // -----------------------------------------------------------------------
     // Step 5: Non-blocking receive loop – drain remaining frames.
