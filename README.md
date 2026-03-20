@@ -84,7 +84,7 @@ ch.set_fd_bitrate(FdBitrate::Rate2M80P)?;    // Data phase
 ch.set_output_control(DriverType::Normal)?;
 ch.bus_on()?;
 
-let msg = CanMessage::new_fd(0x456, &[0u8; 64], true)?; // 64 bytes, BRS enabled
+let msg = CanMessage::new_fd(0x456, &[0u8; 64], true, false)?; // 64 bytes, BRS enabled, standard ID
 ch.write(&msg)?;
 ```
 

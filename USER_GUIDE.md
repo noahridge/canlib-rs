@@ -197,7 +197,7 @@ let msg = CanMessage::new_extended(0x1ABCDEF, &[0x01, 0x02, 0x03]);
 
 ```rust
 let data: Vec<u8> = (0..32).collect();
-let msg = CanMessage::new_fd(0x456, &data, true); // true = BRS enabled
+let msg = CanMessage::new_fd(0x456, &data, true, false); // brs=true, extended=false
 ```
 
 **Inspecting a message:**
@@ -331,7 +331,7 @@ ch.bus_on()?;
 
 // Send a CAN FD message with BRS
 let data: Vec<u8> = (0..48).collect();
-let msg = CanMessage::new_fd(0x456, &data, true);
+let msg = CanMessage::new_fd(0x456, &data, true, false);
 ch.write(&msg)?;
 ```
 

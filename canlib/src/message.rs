@@ -124,10 +124,21 @@ impl CanMessage {
     /// (0-8, 12, 16, 20, 24, 32, 48, or 64) and the data payload
     /// is zero-padded to match.
     ///
-    /// Returns `Err(CanError::Param)` if `id > 0x1FFF_FFFF` or `data.len() > 64`.
-    pub fn new_fd(id: u32, data: &[u8], brs: bool) -> Result<Self> {
-        if id > CAN_EXT_ID_MAX {
-            return Err(CanError::Param);
+    /// If `extended` is true, the message uses a 29-bit extended ID
+    /// (up to `0x1FFF_FFFF`). Otherwise, only standard 11-bit IDs
+    /// (up to `0x7FF`) are accepted.
+    ///
+    /// Returns `Err(CanError::Param)` if the ID exceeds the allowed
+    /// range for the selected mode, or if `data.len() > 64`.
+    pub fn new_fd(id: u32, data: &[u8], brs: bool, extended: bool) -> Result<Self> {
+        if extended {
+            if id > CAN_EXT_ID_MAX {
+                return Err(CanError::Param);
+            }
+        } else {
+            if id > CAN_STD_ID_MAX {
+                return Err(CanError::Param);
+            }
         }
         if data.len() > CANFD_MAX_DLC {
             return Err(CanError::Param);
@@ -137,6 +148,11 @@ impl CanMessage {
         padded[..data.len()].copy_from_slice(data);
 
         let mut flags = MessageFlags::FD;
+        if extended {
+            flags |= MessageFlags::EXT;
+        } else {
+            flags |= MessageFlags::STD;
+        }
         if brs {
             flags |= MessageFlags::BRS;
         }
@@ -235,24 +251,48 @@ mod tests {
 
     #[test]
     fn new_fd_sets_fd_flag_and_brs_when_requested() {
-        let msg_no_brs = CanMessage::new_fd(0x100, &[1; 64], false).unwrap();
+        let msg_no_brs = CanMessage::new_fd(0x100, &[1; 64], false, false).unwrap();
         assert!(msg_no_brs.is_fd());
         assert!(msg_no_brs.flags().contains(MessageFlags::FD));
+        assert!(msg_no_brs.flags().contains(MessageFlags::STD));
         assert!(!msg_no_brs.flags().contains(MessageFlags::BRS));
+        assert!(!msg_no_brs.is_extended());
         assert_eq!(msg_no_brs.dlc(), 64);
 
-        let msg_brs = CanMessage::new_fd(0x100, &[2; 32], true).unwrap();
+        let msg_brs = CanMessage::new_fd(0x100, &[2; 32], true, false).unwrap();
         assert!(msg_brs.is_fd());
         assert!(msg_brs.flags().contains(MessageFlags::FD));
+        assert!(msg_brs.flags().contains(MessageFlags::STD));
         assert!(msg_brs.flags().contains(MessageFlags::BRS));
+        assert!(!msg_brs.is_extended());
         assert_eq!(msg_brs.dlc(), 32);
+    }
+
+    #[test]
+    fn new_fd_extended_sets_ext_flag() {
+        let msg = CanMessage::new_fd(0x1FFF_FFFF, &[0xAA; 16], true, true).unwrap();
+        assert!(msg.is_fd());
+        assert!(msg.is_extended());
+        assert!(msg.flags().contains(MessageFlags::EXT));
+        assert!(!msg.flags().contains(MessageFlags::STD));
+        assert_eq!(msg.id(), 0x1FFF_FFFF);
+    }
+
+    #[test]
+    fn new_fd_rejects_extended_id_without_extended_flag() {
+        assert!(CanMessage::new_fd(0x800, &[1, 2, 3], false, false).is_err());
+    }
+
+    #[test]
+    fn new_fd_extended_rejects_id_over_ext_max() {
+        assert!(CanMessage::new_fd(0x2000_0000, &[], false, true).is_err());
     }
 
     #[test]
     fn fd_dlc_rounds_up_to_valid_sizes() {
         // Exact valid sizes stay as-is
         for &exact in &[0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64] {
-            let msg = CanMessage::new_fd(0x100, &vec![0xAA; exact], false).unwrap();
+            let msg = CanMessage::new_fd(0x100, &vec![0xAA; exact], false, false).unwrap();
             assert_eq!(msg.dlc() as usize, exact, "exact size {} should not change", exact);
             assert_eq!(msg.data().len(), exact);
         }
@@ -269,7 +309,7 @@ mod tests {
         ];
         for &(input_len, expected_dlc) in cases {
             let data: Vec<u8> = (0..input_len as u8).collect();
-            let msg = CanMessage::new_fd(0x100, &data, false).unwrap();
+            let msg = CanMessage::new_fd(0x100, &data, false, false).unwrap();
             assert_eq!(
                 msg.dlc() as usize, expected_dlc,
                 "input len {} should round up to {}", input_len, expected_dlc
@@ -328,13 +368,8 @@ mod tests {
     }
 
     #[test]
-    fn new_fd_rejects_id_over_ext_max() {
-        assert!(CanMessage::new_fd(0x2000_0000, &[], false).is_err());
-    }
-
-    #[test]
     fn new_fd_rejects_data_over_64_bytes() {
-        assert!(CanMessage::new_fd(0x100, &[0; 65], false).is_err());
+        assert!(CanMessage::new_fd(0x100, &[0; 65], false, false).is_err());
     }
 
     #[test]

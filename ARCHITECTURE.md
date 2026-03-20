@@ -85,7 +85,7 @@ Every unsafe FFI call in the wrapper is checked through one of these functions.
 
 ### Message Types (`message.rs`)
 
-- `CanMessage` — Represents a CAN frame (classic or FD). Fields: `id`, `data` (Vec<u8>), `dlc`, `flags`, `timestamp`. Constructors: `new()` (standard 11-bit), `new_extended()` (29-bit), `new_fd()` (CAN FD with optional BRS).
+- `CanMessage` — Represents a CAN frame (classic or FD). Fields: `id`, `data` (Vec<u8>), `dlc`, `flags`, `timestamp`. Constructors: `new()` (standard 11-bit), `new_extended()` (29-bit), `new_fd()` (CAN FD with optional BRS and extended ID).
 - `MessageFlags` — A `bitflags` type mapping CANLib's message flag constants (RTR, STD, EXT, FD, BRS, ESI, etc.).
 
 ### Bus Parameters (`bus_params.rs`)
