@@ -69,14 +69,49 @@ pub const CAN_STD_ID_MAX: u32 = 0x7FF;
 /// Maximum extended (29-bit) CAN identifier.
 pub const CAN_EXT_ID_MAX: u32 = 0x1FFF_FFFF;
 
-/// A CAN message (classic or FD).
+/// A CAN data frame (classic or FD).
 #[derive(Debug, Clone)]
-pub struct CanMessage {
+pub struct DataFrame {
     id: u32,
     data: Vec<u8>,
     dlc: u8,
     flags: MessageFlags,
     timestamp: Option<u64>,
+}
+
+/// A CAN Remote Transmission Request frame.
+#[derive(Debug, Clone)]
+pub struct RemoteFrame {
+    id: u32,
+    dlc: u8,
+    flags: MessageFlags,
+    timestamp: Option<u64>,
+}
+
+/// A CAN error frame.
+#[derive(Debug, Clone)]
+pub struct ErrorFrame {
+    id: u32,
+    data: Vec<u8>,
+    dlc: u8,
+    flags: MessageFlags,
+    timestamp: Option<u64>,
+}
+
+/// A CAN message (classic or FD).
+///
+/// Each variant enforces which fields and flag combinations are valid:
+/// - `Data` — standard data frames (classic CAN and FD)
+/// - `Remote` — Remote Transmission Request frames (no payload)
+/// - `Error` — error frames from the controller
+#[derive(Debug, Clone)]
+pub enum CanMessage {
+    /// A data frame (classic CAN or CAN FD).
+    Data(DataFrame),
+    /// A Remote Transmission Request frame.
+    Remote(RemoteFrame),
+    /// An error frame.
+    Error(ErrorFrame),
 }
 
 impl CanMessage {
@@ -90,13 +125,13 @@ impl CanMessage {
         if data.len() > CAN_MAX_DLC {
             return Err(CanError::Param);
         }
-        Ok(Self {
+        Ok(CanMessage::Data(DataFrame {
             id,
             data: data.to_vec(),
             dlc: data.len() as u8,
             flags: MessageFlags::STD,
             timestamp: None,
-        })
+        }))
     }
 
     /// Create a new extended (29-bit ID) CAN message.
@@ -109,13 +144,13 @@ impl CanMessage {
         if data.len() > CAN_MAX_DLC {
             return Err(CanError::Param);
         }
-        Ok(Self {
+        Ok(CanMessage::Data(DataFrame {
             id,
             data: data.to_vec(),
             dlc: data.len() as u8,
             flags: MessageFlags::EXT,
             timestamp: None,
-        })
+        }))
     }
 
     /// Create a new CAN FD message.
@@ -156,69 +191,149 @@ impl CanMessage {
         if brs {
             flags |= MessageFlags::BRS;
         }
-        Ok(Self {
+        Ok(CanMessage::Data(DataFrame {
             id,
             data: padded,
             dlc: dlc as u8,
             flags,
             timestamp: None,
-        })
+        }))
+    }
+
+    /// Create a new standard (11-bit ID) Remote Transmission Request frame.
+    ///
+    /// RTR frames carry no data payload — only the requested DLC.
+    /// Returns `Err(CanError::Param)` if `id > 0x7FF` or `dlc > 8`.
+    pub fn new_rtr(id: u32, dlc: u8) -> Result<Self> {
+        if id > CAN_STD_ID_MAX {
+            return Err(CanError::Param);
+        }
+        if dlc as usize > CAN_MAX_DLC {
+            return Err(CanError::Param);
+        }
+        Ok(CanMessage::Remote(RemoteFrame {
+            id,
+            dlc,
+            flags: MessageFlags::STD | MessageFlags::RTR,
+            timestamp: None,
+        }))
+    }
+
+    /// Create a new extended (29-bit ID) Remote Transmission Request frame.
+    ///
+    /// RTR frames carry no data payload — only the requested DLC.
+    /// Returns `Err(CanError::Param)` if `id > 0x1FFF_FFFF` or `dlc > 8`.
+    pub fn new_rtr_extended(id: u32, dlc: u8) -> Result<Self> {
+        if id > CAN_EXT_ID_MAX {
+            return Err(CanError::Param);
+        }
+        if dlc as usize > CAN_MAX_DLC {
+            return Err(CanError::Param);
+        }
+        Ok(CanMessage::Remote(RemoteFrame {
+            id,
+            dlc,
+            flags: MessageFlags::EXT | MessageFlags::RTR,
+            timestamp: None,
+        }))
     }
 
     /// Create a message from raw FFI values (no validation).
+    ///
+    /// Dispatches to the appropriate variant based on flags:
+    /// - `ERROR_FRAME` → `CanMessage::Error`
+    /// - `RTR` → `CanMessage::Remote` (data discarded)
+    /// - otherwise → `CanMessage::Data`
     pub(crate) fn from_raw(id: u32, data: Vec<u8>, dlc: u8, flags: MessageFlags, timestamp: u64) -> Self {
-        Self {
-            id,
-            data,
-            dlc,
-            flags,
-            timestamp: Some(timestamp),
+        if flags.contains(MessageFlags::ERROR_FRAME) {
+            CanMessage::Error(ErrorFrame {
+                id,
+                data,
+                dlc,
+                flags,
+                timestamp: Some(timestamp),
+            })
+        } else if flags.contains(MessageFlags::RTR) {
+            CanMessage::Remote(RemoteFrame {
+                id,
+                dlc,
+                flags,
+                timestamp: Some(timestamp),
+            })
+        } else {
+            CanMessage::Data(DataFrame {
+                id,
+                data,
+                dlc,
+                flags,
+                timestamp: Some(timestamp),
+            })
         }
     }
 
     /// CAN identifier (11-bit or 29-bit).
     pub fn id(&self) -> u32 {
-        self.id
+        match self {
+            CanMessage::Data(f) => f.id,
+            CanMessage::Remote(f) => f.id,
+            CanMessage::Error(f) => f.id,
+        }
     }
 
-    /// Message data payload.
+    /// Message data payload. Returns an empty slice for RTR frames.
     pub fn data(&self) -> &[u8] {
-        &self.data
+        match self {
+            CanMessage::Data(f) => &f.data,
+            CanMessage::Remote(_) => &[],
+            CanMessage::Error(f) => &f.data,
+        }
     }
 
     /// Data Length Code.
     pub fn dlc(&self) -> u8 {
-        self.dlc
+        match self {
+            CanMessage::Data(f) => f.dlc,
+            CanMessage::Remote(f) => f.dlc,
+            CanMessage::Error(f) => f.dlc,
+        }
     }
 
     /// Message flags.
     pub fn flags(&self) -> MessageFlags {
-        self.flags
+        match self {
+            CanMessage::Data(f) => f.flags,
+            CanMessage::Remote(f) => f.flags,
+            CanMessage::Error(f) => f.flags,
+        }
     }
 
     /// Hardware timestamp in microseconds (populated on receive).
     pub fn timestamp(&self) -> Option<u64> {
-        self.timestamp
+        match self {
+            CanMessage::Data(f) => f.timestamp,
+            CanMessage::Remote(f) => f.timestamp,
+            CanMessage::Error(f) => f.timestamp,
+        }
     }
 
     /// Returns true if this is a CAN FD message.
     pub fn is_fd(&self) -> bool {
-        self.flags.contains(MessageFlags::FD)
+        self.flags().contains(MessageFlags::FD)
     }
 
     /// Returns true if this is an extended (29-bit) frame.
     pub fn is_extended(&self) -> bool {
-        self.flags.contains(MessageFlags::EXT)
+        self.flags().contains(MessageFlags::EXT)
     }
 
     /// Returns true if this is a Remote Transmission Request.
     pub fn is_rtr(&self) -> bool {
-        self.flags.contains(MessageFlags::RTR)
+        matches!(self, CanMessage::Remote(_))
     }
 
     /// Returns true if this is an error frame.
     pub fn is_error_frame(&self) -> bool {
-        self.flags.contains(MessageFlags::ERROR_FRAME)
+        matches!(self, CanMessage::Error(_))
     }
 }
 
@@ -325,10 +440,92 @@ mod tests {
     }
 
     #[test]
-    fn query_methods() {
-        let msg = CanMessage::from_raw(0x1, vec![], 0, MessageFlags::STD | MessageFlags::RTR | MessageFlags::ERROR_FRAME, 0);
+    fn from_raw_with_rtr_creates_remote() {
+        let msg = CanMessage::from_raw(0x1, vec![0xAA], 1, MessageFlags::STD | MessageFlags::RTR, 100);
         assert!(msg.is_rtr());
+        assert!(!msg.is_error_frame());
+        assert_eq!(msg.data(), &[]);
+        assert_eq!(msg.dlc(), 1);
+        assert_eq!(msg.timestamp(), Some(100));
+    }
+
+    #[test]
+    fn from_raw_with_error_creates_error() {
+        let msg = CanMessage::from_raw(0x1, vec![0xFF], 1, MessageFlags::ERROR_FRAME, 200);
         assert!(msg.is_error_frame());
+        assert!(!msg.is_rtr());
+        assert_eq!(msg.data(), &[0xFF]);
+        assert_eq!(msg.timestamp(), Some(200));
+    }
+
+    #[test]
+    fn from_raw_data_creates_data() {
+        let msg = CanMessage::from_raw(0x100, vec![1, 2, 3], 3, MessageFlags::STD, 300);
+        assert!(!msg.is_rtr());
+        assert!(!msg.is_error_frame());
+        assert_eq!(msg.id(), 0x100);
+        assert_eq!(msg.data(), &[1, 2, 3]);
+        assert_eq!(msg.timestamp(), Some(300));
+    }
+
+    #[test]
+    fn from_raw_error_takes_priority_over_rtr() {
+        // If both ERROR_FRAME and RTR are set, ERROR_FRAME wins
+        let msg = CanMessage::from_raw(0x1, vec![], 0, MessageFlags::ERROR_FRAME | MessageFlags::RTR, 0);
+        assert!(msg.is_error_frame());
+        assert!(!msg.is_rtr());
+    }
+
+    #[test]
+    fn new_rtr_validation() {
+        let msg = CanMessage::new_rtr(0x100, 4).unwrap();
+        assert!(msg.is_rtr());
+        assert!(!msg.is_extended());
+        assert_eq!(msg.id(), 0x100);
+        assert_eq!(msg.dlc(), 4);
+        assert_eq!(msg.data(), &[]);
+        assert!(msg.flags().contains(MessageFlags::RTR));
+        assert!(msg.flags().contains(MessageFlags::STD));
+
+        // Rejects invalid ID
+        assert!(CanMessage::new_rtr(0x800, 0).is_err());
+        // Rejects invalid DLC
+        assert!(CanMessage::new_rtr(0x100, 9).is_err());
+    }
+
+    #[test]
+    fn new_rtr_extended_validation() {
+        let msg = CanMessage::new_rtr_extended(0x1FFF_FFFF, 8).unwrap();
+        assert!(msg.is_rtr());
+        assert!(msg.is_extended());
+        assert_eq!(msg.id(), 0x1FFF_FFFF);
+        assert_eq!(msg.dlc(), 8);
+        assert_eq!(msg.data(), &[]);
+        assert!(msg.flags().contains(MessageFlags::RTR));
+        assert!(msg.flags().contains(MessageFlags::EXT));
+
+        // Rejects invalid ID
+        assert!(CanMessage::new_rtr_extended(0x2000_0000, 0).is_err());
+        // Rejects invalid DLC
+        assert!(CanMessage::new_rtr_extended(0x100, 9).is_err());
+    }
+
+    #[test]
+    fn pattern_match_variants() {
+        let data_msg = CanMessage::new(0x100, &[1, 2]).unwrap();
+        let rtr_msg = CanMessage::new_rtr(0x200, 4).unwrap();
+        let error_msg = CanMessage::from_raw(0x0, vec![0xFF], 1, MessageFlags::ERROR_FRAME, 0);
+
+        assert!(matches!(data_msg, CanMessage::Data(_)));
+        assert!(matches!(rtr_msg, CanMessage::Remote(_)));
+        assert!(matches!(error_msg, CanMessage::Error(_)));
+
+        // Demonstrate destructuring
+        if let CanMessage::Data(frame) = &data_msg {
+            assert_eq!(frame.id, 0x100);
+        } else {
+            panic!("expected Data variant");
+        }
     }
 
     #[test]
