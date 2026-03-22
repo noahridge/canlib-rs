@@ -117,19 +117,57 @@ macro_rules! impl_can_channel {
 }
 
 // ---------------------------------------------------------------------------
+// ChannelHandle (RAII wrapper for the raw CANLib handle)
+// ---------------------------------------------------------------------------
+
+/// RAII wrapper around a raw `canHandle`.
+///
+/// Takes the channel off-bus and closes it when dropped, guaranteeing
+/// cleanup even if the owning `Channel` is restructured in the future.
+struct ChannelHandle {
+    handle: sys::canHandle,
+}
+
+impl ChannelHandle {
+    fn open(channel_num: i32, flags: OpenFlags) -> Result<Self> {
+        crate::ensure_initialized()?;
+        let l = lib()?;
+        let handle = unsafe { (l.canOpenChannel)(channel_num, flags.bits()) };
+        check_handle(handle)?;
+        Ok(Self { handle })
+    }
+
+    fn raw(&self) -> sys::canHandle {
+        self.handle
+    }
+}
+
+impl Drop for ChannelHandle {
+    fn drop(&mut self) {
+        if let Ok(l) = lib() {
+            unsafe {
+                (l.canBusOff)(self.handle);
+                (l.canClose)(self.handle);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Channel (hardware-backed)
 // ---------------------------------------------------------------------------
 
 /// A handle to an open CAN channel.
 ///
-/// The channel is automatically taken off-bus and closed when dropped.
+/// The channel is automatically taken off-bus and closed when dropped
+/// via the inner [`ChannelHandle`].
 ///
 /// # Thread safety
 ///
 /// CANLib handles are per-thread. `Channel` is `Send` but not `Sync`.
 /// Each thread that needs CAN access must open its own channel.
 pub struct Channel {
-    handle: sys::canHandle,
+    inner: ChannelHandle,
     on_bus: bool,
 }
 
@@ -142,12 +180,8 @@ impl Channel {
     /// `channel_num` is the zero-based channel index.
     /// Use [`crate::get_number_of_channels`] to discover available channels.
     pub fn open(channel_num: i32, flags: OpenFlags) -> Result<Self> {
-        crate::ensure_initialized()?;
-        let l = lib()?;
-        let handle = unsafe { (l.canOpenChannel)(channel_num, flags.bits()) };
-        check_handle(handle)?;
         Ok(Self {
-            handle,
+            inner: ChannelHandle::open(channel_num, flags)?,
             on_bus: false,
         })
     }
@@ -155,7 +189,7 @@ impl Channel {
     /// Go on-bus. The channel must have bus parameters configured first.
     pub fn bus_on(&mut self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canBusOn)(self.handle) })?;
+        check_status(unsafe { (l.canBusOn)(self.inner.raw()) })?;
         self.on_bus = true;
         Ok(())
     }
@@ -163,7 +197,7 @@ impl Channel {
     /// Go off-bus.
     pub fn bus_off(&mut self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canBusOff)(self.handle) })?;
+        check_status(unsafe { (l.canBusOff)(self.inner.raw()) })?;
         self.on_bus = false;
         Ok(())
     }
@@ -171,7 +205,7 @@ impl Channel {
     /// Reset the CAN bus controller.
     pub fn reset_bus(&mut self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canResetBus)(self.handle) })?;
+        check_status(unsafe { (l.canResetBus)(self.inner.raw()) })?;
         self.on_bus = false;
         Ok(())
     }
@@ -187,7 +221,7 @@ impl Channel {
     pub fn set_bitrate(&self, bitrate: Bitrate) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canSetBusParams)(self.handle, bitrate.to_raw(), 0, 0, 0, 0, 0)
+            (l.canSetBusParams)(self.inner.raw(), bitrate.to_raw(), 0, 0, 0, 0, 0)
         })
     }
 
@@ -196,7 +230,7 @@ impl Channel {
         let l = lib()?;
         check_status(unsafe {
             (l.canSetBusParams)(
-                self.handle,
+                self.inner.raw(),
                 params.freq() as std::os::raw::c_long,
                 params.tseg1(),
                 params.tseg2(),
@@ -210,14 +244,14 @@ impl Channel {
     /// Set bus parameters using time quanta.
     pub fn set_bus_params_tq(&self, params: &BusParamsTq) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canSetBusParamsTq)(self.handle, params.to_raw()) })
+        check_status(unsafe { (l.canSetBusParamsTq)(self.inner.raw(), params.to_raw()) })
     }
 
     /// Set the CAN FD data-phase bitrate using a predefined constant.
     pub fn set_fd_bitrate(&self, bitrate: FdBitrate) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canSetBusParamsFd)(self.handle, bitrate.to_raw(), 0, 0, 0)
+            (l.canSetBusParamsFd)(self.inner.raw(), bitrate.to_raw(), 0, 0, 0)
         })
     }
 
@@ -232,7 +266,7 @@ impl Channel {
         let l = lib()?;
         check_status(unsafe {
             (l.canSetBusParamsFd)(
-                self.handle,
+                self.inner.raw(),
                 freq_brs as std::os::raw::c_long,
                 tseg1,
                 tseg2,
@@ -249,7 +283,7 @@ impl Channel {
     ) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canSetBusParamsFdTq)(self.handle, arbitration.to_raw(), data.to_raw())
+            (l.canSetBusParamsFdTq)(self.inner.raw(), arbitration.to_raw(), data.to_raw())
         })
     }
 
@@ -264,7 +298,7 @@ impl Channel {
         let mut sync_mode: u32 = 0;
         check_status(unsafe {
             (l.canGetBusParams)(
-                self.handle,
+                self.inner.raw(),
                 &mut freq,
                 &mut tseg1,
                 &mut tseg2,
@@ -280,7 +314,7 @@ impl Channel {
     pub fn get_bus_params_tq(&self) -> Result<BusParamsTq> {
         let l = lib()?;
         let mut raw = sys::kvBusParamsTq::default();
-        check_status(unsafe { (l.canGetBusParamsTq)(self.handle, &mut raw) })?;
+        check_status(unsafe { (l.canGetBusParamsTq)(self.inner.raw(), &mut raw) })?;
         Ok(BusParamsTq::from_raw(raw))
     }
 
@@ -289,14 +323,14 @@ impl Channel {
     /// Set the CAN transceiver driver type.
     pub fn set_output_control(&self, driver: DriverType) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canSetBusOutputControl)(self.handle, driver.to_raw()) })
+        check_status(unsafe { (l.canSetBusOutputControl)(self.inner.raw(), driver.to_raw()) })
     }
 
     /// Get the current CAN transceiver driver type.
     pub fn get_output_control(&self) -> Result<DriverType> {
         let l = lib()?;
         let mut raw: u32 = 0;
-        check_status(unsafe { (l.canGetBusOutputControl)(self.handle, &mut raw) })?;
+        check_status(unsafe { (l.canGetBusOutputControl)(self.inner.raw(), &mut raw) })?;
         DriverType::from_raw(raw).ok_or(CanError::Unknown(raw as i32))
     }
 
@@ -312,7 +346,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canWrite)(
-                self.handle,
+                self.inner.raw(),
                 msg.id() as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 msg.dlc() as u32,
@@ -331,7 +365,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canWriteWait)(
-                self.handle,
+                self.inner.raw(),
                 msg.id() as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 msg.dlc() as u32,
@@ -345,7 +379,7 @@ impl Channel {
     pub fn write_sync(&self, timeout: Duration) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canWriteSync)(self.handle, timeout.as_millis() as std::os::raw::c_ulong)
+            (l.canWriteSync)(self.inner.raw(), timeout.as_millis() as std::os::raw::c_ulong)
         })
     }
 
@@ -364,7 +398,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canRead)(
-                self.handle,
+                self.inner.raw(),
                 &mut id,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
@@ -396,7 +430,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canReadWait)(
-                self.handle,
+                self.inner.raw(),
                 &mut id,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
@@ -422,7 +456,7 @@ impl Channel {
     pub fn read_sync(&self, timeout: Duration) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canReadSync)(self.handle, timeout.as_millis() as std::os::raw::c_ulong)
+            (l.canReadSync)(self.inner.raw(), timeout.as_millis() as std::os::raw::c_ulong)
         })
     }
 
@@ -438,7 +472,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canReadSpecific)(
-                self.handle,
+                self.inner.raw(),
                 id as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
@@ -467,7 +501,7 @@ impl Channel {
 
         check_status(unsafe {
             (l.canReadSpecificSkip)(
-                self.handle,
+                self.inner.raw(),
                 id as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
@@ -495,7 +529,7 @@ impl Channel {
     pub fn set_acceptance_filter(&self, code: u32, mask: u32, extended: bool) -> Result<()> {
         let l = lib()?;
         check_status(unsafe {
-            (l.canSetAcceptanceFilter)(self.handle, code, mask, extended as i32)
+            (l.canSetAcceptanceFilter)(self.inner.raw(), code, mask, extended as i32)
         })
     }
 
@@ -505,7 +539,7 @@ impl Channel {
     pub fn read_status(&self) -> Result<BusStatus> {
         let l = lib()?;
         let mut flags: std::os::raw::c_ulong = 0;
-        check_status(unsafe { (l.canReadStatus)(self.handle, &mut flags) })?;
+        check_status(unsafe { (l.canReadStatus)(self.inner.raw(), &mut flags) })?;
         Ok(BusStatus::from_bits_truncate(flags as u64))
     }
 
@@ -515,7 +549,7 @@ impl Channel {
         let mut tx: u32 = 0;
         let mut rx: u32 = 0;
         let mut ov: u32 = 0;
-        check_status(unsafe { (l.canReadErrorCounters)(self.handle, &mut tx, &mut rx, &mut ov) })?;
+        check_status(unsafe { (l.canReadErrorCounters)(self.inner.raw(), &mut tx, &mut rx, &mut ov) })?;
         Ok(ErrorCounters {
             tx_errors: tx,
             rx_errors: rx,
@@ -526,13 +560,13 @@ impl Channel {
     /// Request chip status from the hardware.
     pub fn request_chip_status(&self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canRequestChipStatus)(self.handle) })
+        check_status(unsafe { (l.canRequestChipStatus)(self.inner.raw()) })
     }
 
     /// Request bus statistics from the hardware.
     pub fn request_bus_statistics(&self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canRequestBusStatistics)(self.handle) })
+        check_status(unsafe { (l.canRequestBusStatistics)(self.inner.raw()) })
     }
 
     /// Get the bus statistics (call [`request_bus_statistics`](Self::request_bus_statistics) first).
@@ -541,7 +575,7 @@ impl Channel {
         let mut raw = sys::canBusStatistics::default();
         check_status(unsafe {
             (l.canGetBusStatistics)(
-                self.handle,
+                self.inner.raw(),
                 &mut raw,
                 std::mem::size_of::<sys::canBusStatistics>(),
             )
@@ -554,38 +588,22 @@ impl Channel {
     /// Flush the receive message queue.
     pub fn flush_rx(&self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canFlushReceiveQueue)(self.handle) })
+        check_status(unsafe { (l.canFlushReceiveQueue)(self.inner.raw()) })
     }
 
     /// Flush the transmit message queue.
     pub fn flush_tx(&self) -> Result<()> {
         let l = lib()?;
-        check_status(unsafe { (l.canFlushTransmitQueue)(self.handle) })
+        check_status(unsafe { (l.canFlushTransmitQueue)(self.inner.raw()) })
     }
 
     /// Get the raw CANLib handle (for advanced use with `canlib-sys`).
     pub fn raw_handle(&self) -> sys::canHandle {
-        self.handle
+        self.inner.raw()
     }
 }
 
 impl_can_channel!(Channel);
-
-impl Drop for Channel {
-    fn drop(&mut self) {
-        // Best-effort cleanup — if the library is loaded, close properly.
-        if let Ok(l) = lib() {
-            if self.on_bus {
-                unsafe {
-                    (l.canBusOff)(self.handle);
-                }
-            }
-            unsafe {
-                (l.canClose)(self.handle);
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // MockChannel (test only)
