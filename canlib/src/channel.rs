@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use canlib_sys as sys;
@@ -126,6 +127,7 @@ macro_rules! impl_can_channel {
 /// cleanup even if the owning `Channel` is restructured in the future.
 struct ChannelHandle {
     handle: sys::canHandle,
+    _not_send: PhantomData<*const ()>,
 }
 
 impl ChannelHandle {
@@ -134,7 +136,7 @@ impl ChannelHandle {
         let l = lib()?;
         let handle = unsafe { (l.canOpenChannel)(channel_num, flags.bits()) };
         check_handle(handle)?;
-        Ok(Self { handle })
+        Ok(Self { handle, _not_send: PhantomData })
     }
 
     fn raw(&self) -> sys::canHandle {
@@ -164,15 +166,12 @@ impl Drop for ChannelHandle {
 ///
 /// # Thread safety
 ///
-/// CANLib handles are per-thread. `Channel` is `Send` but not `Sync`.
+/// `Channel` is `!Send` and `!Sync` because CANlib handles are thread-affine.
 /// Each thread that needs CAN access must open its own channel.
 pub struct Channel {
     inner: ChannelHandle,
     on_bus: bool,
 }
-
-// Channel can be moved to another thread, but cannot be shared across threads.
-unsafe impl Send for Channel {}
 
 impl Channel {
     /// Open a CAN channel.

@@ -110,7 +110,7 @@ Every unsafe FFI call in the wrapper is checked through one of these functions.
 - `Drop` implementation calls `canBusOff` (if on-bus) then `canClose`, ensuring resources are always released.
 
 **Thread Safety:**
-- `Channel` is `Send` but not `Sync`. CANLib handles are per-thread; each thread that needs CAN access must open its own channel. The `Send` impl allows moving a channel to a different thread (e.g., spawning a reader thread).
+- `Channel` is `!Send` and `!Sync`. CANlib handles are thread-affine — they must be used on the thread that created them. `ChannelHandle` contains `PhantomData<*const ()>` which makes both `Channel` and `ChannelHandle` automatically `!Send + !Sync`. Each thread that needs CAN access must open its own channel.
 
 **Method Categories:**
 | Category | Methods |
@@ -144,7 +144,7 @@ All read/write methods use stack-allocated `[u8; 64]` buffers internally. Data i
 |---|---|
 | Null/dangling pointers | All raw pointer operations are confined to the sys crate and the `Channel` methods. The safe API uses `Vec<u8>` and stack buffers. |
 | Use-after-free | `Channel` owns the handle; `Drop` closes it. No way to use a closed handle through the safe API. |
-| Thread safety | `Channel: Send + !Sync` matches CANLib's threading model. `Once` guards initialization. |
+| Thread safety | `Channel: !Send + !Sync` matches CANlib's thread-affine handle model. `Once` guards initialization. |
 | Error propagation | Every FFI call is checked via `check_status`/`check_handle`. No silent failures. |
 | Resource cleanup | RAII via `Drop`. Bus is taken off before handle is closed. |
 | Buffer overflows | Read/write buffers are `CANFD_MAX_DLC` (64 bytes), matching the maximum CAN FD payload. DLC is bounds-checked. |
