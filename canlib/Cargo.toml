@@ -5,7 +5,14 @@ edition = "2021"
 description = "Safe, idiomatic Rust wrapper for Kvaser CANLib"
 license = "MIT"
 
+[features]
+virtual-tests = []
+
 [dependencies]
 canlib-sys = { path = "../canlib-sys" }
 bitflags = "2"
 thiserror = "2"
+
+[[example]]
+name = "virtual_loopback"
+required-features = ["virtual-tests"]
