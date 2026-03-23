@@ -49,7 +49,7 @@ fn main() -> canlib::Result<()> {
 
     // Receive a message (2 second timeout)
     let received = ch.read_wait(Duration::from_secs(2))?;
-    println!("Got: id=0x{:X} data={:02X?}", received.id, received.data);
+    println!("Got: id=0x{:X} data={:02X?}", received.id(), received.data());
 
     Ok(())
     // Channel automatically goes off-bus and closes when dropped
@@ -200,6 +200,13 @@ let data: Vec<u8> = (0..32).collect();
 let msg = CanMessage::new_fd(0x456, &data, true, false); // brs=true, extended=false
 ```
 
+**Remote Transmission Request (RTR):**
+
+```rust
+let rtr = CanMessage::new_rtr(0x123, 4);          // Standard 11-bit ID, DLC=4
+let rtr_ext = CanMessage::new_rtr_extended(0x1ABCDEF, 8); // Extended 29-bit ID
+```
+
 **Inspecting a message:**
 
 ```rust
@@ -207,6 +214,26 @@ msg.is_extended();    // 29-bit ID?
 msg.is_fd();          // CAN FD frame?
 msg.is_rtr();         // Remote Transmission Request?
 msg.is_error_frame(); // Error frame?
+```
+
+**Pattern matching on frame type:**
+
+`CanMessage` is an enum with `Data`, `Remote`, and `Error` variants, so you can match on the frame type:
+
+```rust
+use canlib::{CanMessage, DataFrame, RemoteFrame, ErrorFrame};
+
+match msg {
+    CanMessage::Data(frame) => {
+        println!("Data frame: id=0x{:X} payload={:02X?}", msg.id(), msg.data());
+    }
+    CanMessage::Remote(_) => {
+        println!("RTR frame: id=0x{:X} dlc={}", msg.id(), msg.dlc());
+    }
+    CanMessage::Error(_) => {
+        println!("Error frame received");
+    }
+}
 ```
 
 ### Sending Messages
@@ -232,7 +259,7 @@ use std::time::Duration;
 
 // Non-blocking read (returns Err(CanError::NoMsg) if queue is empty)
 match ch.read() {
-    Ok(msg) => println!("Got: 0x{:X}", msg.id),
+    Ok(msg) => println!("Got: 0x{:X}", msg.id()),
     Err(CanError::NoMsg) => println!("No message"),
     Err(e) => return Err(e),
 }
@@ -240,7 +267,7 @@ match ch.read() {
 // Blocking read with timeout
 let msg = ch.read_wait(Duration::from_secs(2))?;
 println!("id=0x{:X} data={:02X?} timestamp={}us",
-    msg.id, msg.data, msg.timestamp.unwrap_or(0));
+    msg.id(), msg.data(), msg.timestamp().unwrap_or(0));
 
 // Wait for any message to arrive (doesn't consume it)
 ch.read_sync(Duration::from_secs(5))?;

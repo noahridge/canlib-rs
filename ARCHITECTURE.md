@@ -85,7 +85,12 @@ Every unsafe FFI call in the wrapper is checked through one of these functions.
 
 ### Message Types (`message.rs`)
 
-- `CanMessage` — Represents a CAN frame (classic or FD). Fields: `id`, `data` (Vec<u8>), `dlc`, `flags`, `timestamp`. Constructors: `new()` (standard 11-bit), `new_extended()` (29-bit), `new_fd()` (CAN FD with optional BRS and extended ID).
+- `CanMessage` — An enum with three variants representing different CAN frame types:
+  - `Data(DataFrame)` — Standard data frames (classic CAN and CAN FD)
+  - `Remote(RemoteFrame)` — Remote Transmission Request frames (no payload)
+  - `Error(ErrorFrame)` — Error frames from the controller
+
+  This design uses the type system to enforce valid frame types — invalid combinations (e.g., an error frame with FD+BRS flags) cannot be represented. Shared accessors (`id()`, `data()`, `dlc()`, `flags()`, `timestamp()`) delegate via match, and query methods (`is_rtr()`, `is_error_frame()`) use `matches!()` on the variant. Constructors: `new()` (standard 11-bit), `new_extended()` (29-bit), `new_fd()` (CAN FD), `new_rtr()` / `new_rtr_extended()` (RTR frames). The `from_raw()` constructor dispatches to the appropriate variant based on flags (ERROR_FRAME > RTR > Data).
 - `MessageFlags` — A `bitflags` type mapping CANLib's message flag constants (RTR, STD, EXT, FD, BRS, ESI, etc.).
 
 ### Bus Parameters (`bus_params.rs`)
