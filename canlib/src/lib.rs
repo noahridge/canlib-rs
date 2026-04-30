@@ -35,9 +35,19 @@ pub mod error;
 pub mod message;
 pub mod status;
 
+// Re-export the embedded-can crate so downstream users can access the
+// trait / identifier types via `canlib::embedded_can::*` without
+// declaring their own dependency. This guarantees they share the same
+// version we implement against.
+pub use embedded_can;
+
 // Re-export primary types at crate root for convenience.
 pub use bus_params::{Bitrate, BusParams, BusParamsTq, DriverType, FdBitrate};
 pub use channel::{CanBusControl, CanChannel, CanDiagnostics, CanRead, CanWrite, Channel, OpenFlags};
+pub use embedded_can::{ExtendedId, Frame, Id, StandardId};
+// Aliased to keep the crate-root namespace unambiguous; the original
+// name is still reachable via `canlib::embedded_can::ErrorKind`.
+pub use embedded_can::ErrorKind as BusErrorKind;
 pub use embedded_hal::{BusError, EmbeddedCanError};
 pub use error::{CanError, Result};
 pub use message::{CanMessage, DataFrame, ErrorFrame, MessageFlags, RemoteFrame, CAN_STD_ID_MAX, CAN_EXT_ID_MAX};
