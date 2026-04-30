@@ -1,9 +1,11 @@
-//! [`embedded-can`] integration (gated by the `embedded-hal` feature).
+//! [`embedded-can`] integration.
 //!
 //! This module provides:
+//! - [`BusError`], a structured CAN bus protocol error decoded from a received
+//!   error frame, preserving the raw `canMSGERR_*` flag bits and hardware
+//!   timestamp alongside the categorised [`embedded_can::ErrorKind`].
 //! - [`EmbeddedCanError`], a wrapper that distinguishes software/driver errors
-//!   ([`CanError`]) from on-the-wire CAN protocol errors decoded from received
-//!   error frames.
+//!   ([`CanError`]) from on-the-wire bus errors ([`BusError`]).
 //! - An [`embedded_can::Frame`] impl for [`CanMessage`].
 //! - Impls of [`embedded_can::nb::Can`] and [`embedded_can::blocking::Can`] for
 //!   the hardware [`crate::Channel`].
@@ -27,33 +29,66 @@ use crate::channel::{CanRead, CanWrite, Channel};
 use crate::error::CanError;
 use crate::message::{CanMessage, MessageFlags, CAN_MAX_DLC};
 
+/// A CAN bus protocol error decoded from a received error frame.
+///
+/// Carries the raw `canMSGERR_*` flag bits and hardware timestamp alongside
+/// the [`embedded_can::ErrorKind`] categorisation, so callers can reach for
+/// detail (e.g. distinguishing Bit0 from Bit1, or correlating with a
+/// timestamp) without giving up the trait-level abstraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BusError {
+    /// Categorised error kind for `embedded_can::Error::kind()`.
+    pub kind: ErrorKind,
+    /// Raw error-frame flags (the `ERROR_FRAME` bit and any `ERR_*` bits).
+    pub flags: MessageFlags,
+    /// Hardware timestamp from the error frame, if available.
+    pub timestamp: Option<u64>,
+}
+
+impl BusError {
+    /// Build a [`BusError`] from the message flags and timestamp of an error frame.
+    pub fn from_flags(flags: MessageFlags, timestamp: Option<u64>) -> Self {
+        Self {
+            kind: decode_error_frame(flags),
+            flags,
+            timestamp,
+        }
+    }
+}
+
+impl core::fmt::Display for BusError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "CAN bus error: {:?} (flags={:?})", self.kind, self.flags)
+    }
+}
+
 /// Error type bridging CANLib errors and CAN bus protocol errors for `embedded-can`.
 ///
 /// `Lib` carries software/driver-layer errors from the CANLib SDK
 /// (timeouts, hardware faults, parameter validation, etc.).
 ///
-/// `Bus` carries on-the-wire CAN protocol errors decoded from a received
-/// error frame (`Stuff`, `Form`, `Crc`, `Bit`, `Overrun`).
+/// `Bus` carries an on-the-wire CAN protocol error decoded from a received
+/// error frame.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EmbeddedCanError {
     /// Software/driver-layer error from CANLib.
     #[error("library error: {0}")]
     Lib(#[from] CanError),
     /// CAN bus protocol error decoded from a received error frame.
-    #[error("bus protocol error: {0:?}")]
-    Bus(ErrorKind),
+    #[error("{0}")]
+    Bus(BusError),
 }
 
 impl embedded_can::Error for EmbeddedCanError {
     fn kind(&self) -> ErrorKind {
         match self {
             EmbeddedCanError::Lib(_) => ErrorKind::Other,
-            EmbeddedCanError::Bus(k) => *k,
+            EmbeddedCanError::Bus(b) => b.kind,
         }
     }
 }
 
-/// Decode the flags of an error frame into an `embedded_can::ErrorKind`.
+/// Decode the flags of an error frame into an [`embedded_can::ErrorKind`].
 ///
 /// Multiple bits may be set on a single error frame; the most specific
 /// protocol error is preferred over `Other`. Overrun (HW or SW) takes
@@ -150,9 +185,9 @@ fn nb_transmit<C: CanWrite>(
 
 fn nb_receive<C: CanRead>(chan: &C) -> nb::Result<CanMessage, EmbeddedCanError> {
     match chan.read() {
-        Ok(msg) if msg.is_error_frame() => Err(nb::Error::Other(
-            EmbeddedCanError::Bus(decode_error_frame(msg.flags())),
-        )),
+        Ok(msg) if msg.is_error_frame() => Err(nb::Error::Other(EmbeddedCanError::Bus(
+            BusError::from_flags(msg.flags(), msg.timestamp()),
+        ))),
         Ok(msg) => Ok(msg),
         Err(CanError::NoMsg) => Err(nb::Error::WouldBlock),
         Err(e) => Err(nb::Error::Other(EmbeddedCanError::Lib(e))),
@@ -179,7 +214,10 @@ fn blocking_receive<C: CanRead>(chan: &C) -> Result<CanMessage, EmbeddedCanError
     loop {
         match chan.read_wait(Duration::from_millis(FOREVER_MS)) {
             Ok(msg) if msg.is_error_frame() => {
-                return Err(EmbeddedCanError::Bus(decode_error_frame(msg.flags())));
+                return Err(EmbeddedCanError::Bus(BusError::from_flags(
+                    msg.flags(),
+                    msg.timestamp(),
+                )));
             }
             Ok(msg) => return Ok(msg),
             Err(CanError::Timeout) => continue,
@@ -276,8 +314,22 @@ mod tests {
             ErrorKind::Acknowledge,
             ErrorKind::Other,
         ] {
-            assert_eq!(EmbeddedCanError::Bus(k).kind(), k);
+            let bus = BusError {
+                kind: k,
+                flags: MessageFlags::empty(),
+                timestamp: None,
+            };
+            assert_eq!(EmbeddedCanError::Bus(bus).kind(), k);
         }
+    }
+
+    #[test]
+    fn bus_error_preserves_flags_and_timestamp() {
+        let flags = MessageFlags::ERROR_FRAME | MessageFlags::ERR_BIT0;
+        let bus = BusError::from_flags(flags, Some(12_345));
+        assert_eq!(bus.kind, ErrorKind::Bit);
+        assert_eq!(bus.flags, flags);
+        assert_eq!(bus.timestamp, Some(12_345));
     }
 
     #[test]
@@ -395,18 +447,17 @@ mod tests {
     fn nb_receive_filters_error_frames_into_bus_errors() {
         let mut mock = MockChannel::new();
         // Construct a synthetic error frame with a CRC bit set.
-        let err = CanMessage::from_raw(
-            0,
-            vec![],
-            0,
-            MessageFlags::ERROR_FRAME | MessageFlags::ERR_CRC,
-            0,
-        );
+        let flags = MessageFlags::ERROR_FRAME | MessageFlags::ERR_CRC;
+        let err = CanMessage::from_raw(0, vec![], 0, flags, 999);
         mock.push_rx(err);
         let r = NbCan::receive(&mut mock);
         match r {
-            Err(nb::Error::Other(EmbeddedCanError::Bus(ErrorKind::Crc))) => {}
-            other => panic!("expected Bus(Crc), got {:?}", other),
+            Err(nb::Error::Other(EmbeddedCanError::Bus(b))) => {
+                assert_eq!(b.kind, ErrorKind::Crc);
+                assert_eq!(b.flags, flags);
+                assert_eq!(b.timestamp, Some(999));
+            }
+            other => panic!("expected Bus(_), got {:?}", other),
         }
     }
 
@@ -437,17 +488,16 @@ mod tests {
     #[test]
     fn blocking_receive_surfaces_bus_error() {
         let mut mock = MockChannel::new();
-        let err = CanMessage::from_raw(
-            0,
-            vec![],
-            0,
-            MessageFlags::ERROR_FRAME | MessageFlags::ERR_BIT0,
-            0,
-        );
+        let flags = MessageFlags::ERROR_FRAME | MessageFlags::ERR_BIT0;
+        let err = CanMessage::from_raw(0, vec![], 0, flags, 42);
         mock.push_rx(err);
         match BlockingCan::receive(&mut mock) {
-            Err(EmbeddedCanError::Bus(ErrorKind::Bit)) => {}
-            other => panic!("expected Bus(Bit), got {:?}", other.err()),
+            Err(EmbeddedCanError::Bus(b)) => {
+                assert_eq!(b.kind, ErrorKind::Bit);
+                assert_eq!(b.flags, flags);
+                assert_eq!(b.timestamp, Some(42));
+            }
+            other => panic!("expected Bus(_), got {:?}", other.err()),
         }
     }
 

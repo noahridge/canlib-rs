@@ -9,9 +9,5 @@ license = "MIT"
 canlib-sys = { path = "../canlib-sys" }
 bitflags = "2"
 thiserror = "2"
-embedded-can = { version = "0.4", optional = true }
-nb = { version = "1", optional = true }
-
-[features]
-default = []
-embedded-hal = ["dep:embedded-can", "dep:nb"]
+embedded-can = "0.4"
+nb = "1"

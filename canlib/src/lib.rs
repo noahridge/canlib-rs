@@ -30,22 +30,18 @@
 
 pub mod bus_params;
 pub mod channel;
+pub mod embedded_hal;
 pub mod error;
 pub mod message;
 pub mod status;
 
-#[cfg(feature = "embedded-hal")]
-pub mod embedded_hal;
-
 // Re-export primary types at crate root for convenience.
 pub use bus_params::{Bitrate, BusParams, BusParamsTq, DriverType, FdBitrate};
 pub use channel::{CanBusControl, CanChannel, CanDiagnostics, CanRead, CanWrite, Channel, OpenFlags};
+pub use embedded_hal::{BusError, EmbeddedCanError};
 pub use error::{CanError, Result};
 pub use message::{CanMessage, DataFrame, ErrorFrame, MessageFlags, RemoteFrame, CAN_STD_ID_MAX, CAN_EXT_ID_MAX};
 pub use status::{BusStatistics, BusStatus, ErrorCounters};
-
-#[cfg(feature = "embedded-hal")]
-pub use embedded_hal::EmbeddedCanError;
 
 use std::sync::Once;
 
