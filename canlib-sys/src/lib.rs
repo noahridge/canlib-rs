@@ -104,6 +104,16 @@ pub const canFDMSG_FDF: ::std::os::raw::c_uint = 0x010000;
 pub const canFDMSG_BRS: ::std::os::raw::c_uint = 0x020000;
 pub const canFDMSG_ESI: ::std::os::raw::c_uint = 0x040000;
 
+// ---- Error-frame flags (set on the message flags of an error frame) ----
+
+pub const canMSGERR_HW_OVERRUN: ::std::os::raw::c_uint = 0x0200;
+pub const canMSGERR_SW_OVERRUN: ::std::os::raw::c_uint = 0x0400;
+pub const canMSGERR_STUFF: ::std::os::raw::c_uint = 0x0800;
+pub const canMSGERR_FORM: ::std::os::raw::c_uint = 0x1000;
+pub const canMSGERR_CRC: ::std::os::raw::c_uint = 0x2000;
+pub const canMSGERR_BIT0: ::std::os::raw::c_uint = 0x4000;
+pub const canMSGERR_BIT1: ::std::os::raw::c_uint = 0x8000;
+
 // ---- Driver types ----
 
 pub const canDRIVER_NORMAL: ::std::os::raw::c_uint = 4;

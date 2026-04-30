@@ -30,6 +30,20 @@ bitflags::bitflags! {
         const BRS = sys::canFDMSG_BRS;
         /// CAN FD Error State Indicator.
         const ESI = sys::canFDMSG_ESI;
+        /// Hardware receive buffer overrun (set on error frames).
+        const ERR_HW_OVERRUN = sys::canMSGERR_HW_OVERRUN;
+        /// Software receive buffer overrun (set on error frames).
+        const ERR_SW_OVERRUN = sys::canMSGERR_SW_OVERRUN;
+        /// Stuff error (set on error frames).
+        const ERR_STUFF = sys::canMSGERR_STUFF;
+        /// Form error (set on error frames).
+        const ERR_FORM = sys::canMSGERR_FORM;
+        /// CRC error (set on error frames).
+        const ERR_CRC = sys::canMSGERR_CRC;
+        /// Bit-0 error (dominant transmitted, recessive monitored).
+        const ERR_BIT0 = sys::canMSGERR_BIT0;
+        /// Bit-1 error (recessive transmitted, dominant monitored).
+        const ERR_BIT1 = sys::canMSGERR_BIT1;
     }
 }
 
