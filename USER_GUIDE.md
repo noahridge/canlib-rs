@@ -384,7 +384,7 @@ All error variants implement `Display` with human-readable messages.
 ## Thread Safety
 
 - The CANLib library is initialized once, thread-safely, using `std::sync::Once`.
-- `Channel` is `Send` but **not** `Sync`. You can move a channel to another thread, but you cannot share it across threads. Each thread that needs CAN access should open its own channel.
+- `Channel` is **not `Send`** and **not `Sync`** because CANlib handles are thread-affine — they must be used on the thread that created them. Each thread that needs CAN access must open its own channel.
 - Multiple threads can open the same physical channel number independently.
 
 ## Resource Cleanup
@@ -410,8 +410,8 @@ cargo run --example send_receive
 # Send a CAN FD message
 cargo run --example canfd
 
-# Full test suite using virtual channels (no hardware needed)
-cargo run --example virtual_loopback
+# Full test suite using virtual channels (requires virtual CAN driver)
+cargo run --example virtual_loopback --features virtual-tests
 ```
 
 ### Virtual Channel Testing
