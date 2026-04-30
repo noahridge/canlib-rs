@@ -12,6 +12,8 @@ virtual-tests = []
 canlib-sys = { path = "../canlib-sys" }
 bitflags = "2"
 thiserror = "2"
+embedded-can = "0.4"
+nb = "1"
 
 [[example]]
 name = "virtual_loopback"
