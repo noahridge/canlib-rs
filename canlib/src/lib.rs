@@ -3,7 +3,7 @@
 //! # Getting started
 //!
 //! ```no_run
-//! use canlib::{Channel, OpenFlags, Bitrate, CanMessage};
+//! use canlib::{Channel, OpenFlags, Bitrate, CanMessage, StandardId};
 //! use std::time::Duration;
 //!
 //! // Library is initialized automatically on first use.
@@ -15,8 +15,9 @@
 //! ch.set_bitrate(Bitrate::Rate500K).unwrap();
 //! ch.bus_on().unwrap();
 //!
-//! // Send a message
-//! let msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+//! // Send a message — typed Id chooses standard vs extended at the call site.
+//! let id = StandardId::new(0x123).unwrap();
+//! let msg = CanMessage::new(id, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
 //! ch.write(&msg).unwrap();
 //!
 //! // Receive a message
@@ -50,7 +51,7 @@ pub use embedded_can::{ExtendedId, Frame, Id, StandardId};
 pub use embedded_can::ErrorKind as BusErrorKind;
 pub use embedded_hal::{BusError, EmbeddedCanError};
 pub use error::{CanError, Result};
-pub use message::{CanMessage, DataFrame, ErrorFrame, MessageFlags, RemoteFrame, CAN_STD_ID_MAX, CAN_EXT_ID_MAX};
+pub use message::{Brs, CanMessage, DataFrame, ErrorFrame, MessageFlags, RemoteFrame, CAN_STD_ID_MAX, CAN_EXT_ID_MAX};
 pub use status::{BusStatistics, BusStatus, ErrorCounters};
 
 use std::sync::Once;

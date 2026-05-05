@@ -47,7 +47,7 @@ You need either:
 ## Quick start
 
 ```rust
-use canlib::{Bitrate, CanMessage, Channel, OpenFlags};
+use canlib::{Bitrate, CanMessage, Channel, OpenFlags, StandardId};
 use std::time::Duration;
 
 fn main() -> canlib::Result<()> {
@@ -55,8 +55,9 @@ fn main() -> canlib::Result<()> {
     ch.set_bitrate(Bitrate::Rate500K)?;
     ch.bus_on()?;
 
-    // Send
-    let msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF])?;
+    // Send — pass a StandardId or ExtendedId to choose the format
+    let id = StandardId::new(0x123).unwrap();
+    let msg = CanMessage::new(id, &[0xDE, 0xAD, 0xBE, 0xEF])?;
     ch.write(&msg)?;
 
     // Receive (2s timeout)
@@ -74,7 +75,7 @@ fn main() -> canlib::Result<()> {
 ## CAN FD
 
 ```rust
-use canlib::{Bitrate, CanMessage, Channel, DriverType, FdBitrate, OpenFlags};
+use canlib::{Bitrate, Brs, CanMessage, Channel, DriverType, FdBitrate, OpenFlags, StandardId};
 
 let flags = OpenFlags::CAN_FD | OpenFlags::ACCEPT_VIRTUAL | OpenFlags::REQUIRE_INIT_ACCESS;
 let mut ch = Channel::open(0, flags)?;
@@ -84,7 +85,9 @@ ch.set_fd_bitrate(FdBitrate::Rate2M80P)?;    // Data phase
 ch.set_output_control(DriverType::Normal)?;
 ch.bus_on()?;
 
-let msg = CanMessage::new_fd(0x456, &[0u8; 64], true, false)?; // 64 bytes, BRS enabled, standard ID
+// 64 bytes, BRS enabled, standard ID
+let id = StandardId::new(0x456).unwrap();
+let msg = CanMessage::new_fd(id, &[0u8; 64], Brs::On)?;
 ch.write(&msg)?;
 ```
 

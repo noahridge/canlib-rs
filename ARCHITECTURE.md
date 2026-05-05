@@ -90,7 +90,7 @@ Every unsafe FFI call in the wrapper is checked through one of these functions.
   - `Remote(RemoteFrame)` — Remote Transmission Request frames (no payload)
   - `Error(ErrorFrame)` — Error frames from the controller
 
-  This design uses the type system to enforce valid frame types — invalid combinations (e.g., an error frame with FD+BRS flags) cannot be represented. Shared accessors (`id()`, `data()`, `dlc()`, `flags()`, `timestamp()`) delegate via match, and query methods (`is_rtr()`, `is_error_frame()`) use `matches!()` on the variant. Constructors: `new()` (standard 11-bit), `new_extended()` (29-bit), `new_fd()` (CAN FD), `new_rtr()` / `new_rtr_extended()` (RTR frames). The `from_raw()` constructor dispatches to the appropriate variant based on flags (ERROR_FRAME > RTR > Data).
+  This design uses the type system to enforce valid frame types — invalid combinations (e.g., an error frame with FD+BRS flags) cannot be represented. Shared accessors (`id()`, `data()`, `dlc()`, `flags()`, `timestamp()`) delegate via match, and query methods (`is_rtr()`, `is_error_frame()`) use `matches!()` on the variant. Constructors take typed `embedded_can::Id` values (`StandardId` for 11-bit, `ExtendedId` for 29-bit) so the std/ext distinction is enforced at compile time: `new()` for classic CAN data frames, `new_fd()` for CAN FD (BRS controlled by the `Brs::On`/`Brs::Off` enum), `new_remote()` for RTR. The `from_raw()` constructor dispatches to the appropriate variant based on flags (ERROR_FRAME > RTR > Data).
 - `MessageFlags` — A `bitflags` type mapping CANLib's message flag constants (RTR, STD, EXT, FD, BRS, ESI, etc.).
 
 ### Bus Parameters (`bus_params.rs`)

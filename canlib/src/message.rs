@@ -1,6 +1,20 @@
 use canlib_sys as sys;
+use embedded_can::Id;
 
 use crate::error::{CanError, Result};
+
+/// CAN FD Bit Rate Switch.
+///
+/// Controls whether the data phase of a CAN FD frame is transmitted at
+/// the faster FD bitrate (`On`) or at the same bitrate as the
+/// arbitration phase (`Off`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Brs {
+    /// Switch to the FD data-phase bitrate during the data field.
+    On,
+    /// Stay at the arbitration-phase bitrate.
+    Off,
+}
 
 bitflags::bitflags! {
     /// Flags associated with a CAN message.
@@ -128,67 +142,46 @@ pub enum CanMessage {
     Error(ErrorFrame),
 }
 
+/// Convert a typed `Id` into the raw `u32` and matching std/ext flag.
+pub(crate) fn id_to_raw_and_flag(id: Id) -> (u32, MessageFlags) {
+    match id {
+        Id::Standard(s) => (u32::from(s.as_raw()), MessageFlags::STD),
+        Id::Extended(e) => (e.as_raw(), MessageFlags::EXT),
+    }
+}
+
 impl CanMessage {
-    /// Create a new standard (11-bit ID) CAN message.
+    /// Create a classic CAN data frame.
     ///
-    /// Returns `Err(CanError::Param)` if `id > 0x7FF` or `data.len() > 8`.
-    pub fn new(id: u32, data: &[u8]) -> Result<Self> {
-        if id > CAN_STD_ID_MAX {
-            return Err(CanError::Param);
-        }
+    /// The `id` may be a [`StandardId`](embedded_can::StandardId), an
+    /// [`ExtendedId`](embedded_can::ExtendedId), or an [`Id`]; the
+    /// std/ext flag is taken from its variant.
+    ///
+    /// Returns `Err(CanError::Param)` if `data.len() > 8`.
+    pub fn new(id: impl Into<Id>, data: &[u8]) -> Result<Self> {
         if data.len() > CAN_MAX_DLC {
             return Err(CanError::Param);
         }
+        let (raw, flag) = id_to_raw_and_flag(id.into());
         Ok(CanMessage::Data(DataFrame {
-            id,
+            id: raw,
             data: data.to_vec(),
             dlc: data.len() as u8,
-            flags: MessageFlags::STD,
+            flags: flag,
             timestamp: None,
         }))
     }
 
-    /// Create a new extended (29-bit ID) CAN message.
-    ///
-    /// Returns `Err(CanError::Param)` if `id > 0x1FFF_FFFF` or `data.len() > 8`.
-    pub fn new_extended(id: u32, data: &[u8]) -> Result<Self> {
-        if id > CAN_EXT_ID_MAX {
-            return Err(CanError::Param);
-        }
-        if data.len() > CAN_MAX_DLC {
-            return Err(CanError::Param);
-        }
-        Ok(CanMessage::Data(DataFrame {
-            id,
-            data: data.to_vec(),
-            dlc: data.len() as u8,
-            flags: MessageFlags::EXT,
-            timestamp: None,
-        }))
-    }
-
-    /// Create a new CAN FD message.
+    /// Create a CAN FD data frame.
     ///
     /// The DLC is rounded up to the nearest valid CAN FD size
     /// (0-8, 12, 16, 20, 24, 32, 48, or 64) and the data payload
-    /// is zero-padded to match.
+    /// is zero-padded to match. The std/ext flag is taken from
+    /// the [`Id`] variant. Pass [`Brs::On`] to switch to the faster
+    /// data-phase bitrate during the data field.
     ///
-    /// If `extended` is true, the message uses a 29-bit extended ID
-    /// (up to `0x1FFF_FFFF`). Otherwise, only standard 11-bit IDs
-    /// (up to `0x7FF`) are accepted.
-    ///
-    /// Returns `Err(CanError::Param)` if the ID exceeds the allowed
-    /// range for the selected mode, or if `data.len() > 64`.
-    pub fn new_fd(id: u32, data: &[u8], brs: bool, extended: bool) -> Result<Self> {
-        if extended {
-            if id > CAN_EXT_ID_MAX {
-                return Err(CanError::Param);
-            }
-        } else {
-            if id > CAN_STD_ID_MAX {
-                return Err(CanError::Param);
-            }
-        }
+    /// Returns `Err(CanError::Param)` if `data.len() > 64`.
+    pub fn new_fd(id: impl Into<Id>, data: &[u8], brs: Brs) -> Result<Self> {
         if data.len() > CANFD_MAX_DLC {
             return Err(CanError::Param);
         }
@@ -196,17 +189,13 @@ impl CanMessage {
         let mut padded = vec![0u8; dlc];
         padded[..data.len()].copy_from_slice(data);
 
-        let mut flags = MessageFlags::FD;
-        if extended {
-            flags |= MessageFlags::EXT;
-        } else {
-            flags |= MessageFlags::STD;
-        }
-        if brs {
+        let (raw, mut flags) = id_to_raw_and_flag(id.into());
+        flags |= MessageFlags::FD;
+        if brs == Brs::On {
             flags |= MessageFlags::BRS;
         }
         Ok(CanMessage::Data(DataFrame {
-            id,
+            id: raw,
             data: padded,
             dlc: dlc as u8,
             flags,
@@ -214,40 +203,21 @@ impl CanMessage {
         }))
     }
 
-    /// Create a new standard (11-bit ID) Remote Transmission Request frame.
+    /// Create a Remote Transmission Request frame.
     ///
     /// RTR frames carry no data payload — only the requested DLC.
-    /// Returns `Err(CanError::Param)` if `id > 0x7FF` or `dlc > 8`.
-    pub fn new_rtr(id: u32, dlc: u8) -> Result<Self> {
-        if id > CAN_STD_ID_MAX {
-            return Err(CanError::Param);
-        }
+    /// The std/ext flag is taken from the [`Id`] variant.
+    ///
+    /// Returns `Err(CanError::Param)` if `dlc > 8`.
+    pub fn new_remote(id: impl Into<Id>, dlc: u8) -> Result<Self> {
         if dlc as usize > CAN_MAX_DLC {
             return Err(CanError::Param);
         }
+        let (raw, flag) = id_to_raw_and_flag(id.into());
         Ok(CanMessage::Remote(RemoteFrame {
-            id,
+            id: raw,
             dlc,
-            flags: MessageFlags::STD | MessageFlags::RTR,
-            timestamp: None,
-        }))
-    }
-
-    /// Create a new extended (29-bit ID) Remote Transmission Request frame.
-    ///
-    /// RTR frames carry no data payload — only the requested DLC.
-    /// Returns `Err(CanError::Param)` if `id > 0x1FFF_FFFF` or `dlc > 8`.
-    pub fn new_rtr_extended(id: u32, dlc: u8) -> Result<Self> {
-        if id > CAN_EXT_ID_MAX {
-            return Err(CanError::Param);
-        }
-        if dlc as usize > CAN_MAX_DLC {
-            return Err(CanError::Param);
-        }
-        Ok(CanMessage::Remote(RemoteFrame {
-            id,
-            dlc,
-            flags: MessageFlags::EXT | MessageFlags::RTR,
+            flags: flag | MessageFlags::RTR,
             timestamp: None,
         }))
     }
@@ -354,10 +324,18 @@ impl CanMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use embedded_can::{ExtendedId, StandardId};
+
+    fn std(id: u16) -> StandardId {
+        StandardId::new(id).expect("test id in range")
+    }
+    fn ext(id: u32) -> ExtendedId {
+        ExtendedId::new(id).expect("test id in range")
+    }
 
     #[test]
     fn new_sets_std_flag_and_correct_dlc() {
-        let msg = CanMessage::new(0x123, &[1, 2, 3, 4]).unwrap();
+        let msg = CanMessage::new(std(0x123), &[1, 2, 3, 4]).unwrap();
         assert_eq!(msg.id(), 0x123);
         assert_eq!(msg.data(), &[1, 2, 3, 4]);
         assert_eq!(msg.dlc(), 4);
@@ -368,8 +346,8 @@ mod tests {
     }
 
     #[test]
-    fn new_extended_sets_ext_flag() {
-        let msg = CanMessage::new_extended(0x1FFFFFFF, &[0xAA, 0xBB]).unwrap();
+    fn new_with_extended_id_sets_ext_flag() {
+        let msg = CanMessage::new(ext(0x1FFFFFFF), &[0xAA, 0xBB]).unwrap();
         assert_eq!(msg.id(), 0x1FFFFFFF);
         assert!(msg.is_extended());
         assert!(msg.flags().contains(MessageFlags::EXT));
@@ -380,7 +358,7 @@ mod tests {
 
     #[test]
     fn new_fd_sets_fd_flag_and_brs_when_requested() {
-        let msg_no_brs = CanMessage::new_fd(0x100, &[1; 64], false, false).unwrap();
+        let msg_no_brs = CanMessage::new_fd(std(0x100), &[1; 64], Brs::Off).unwrap();
         assert!(msg_no_brs.is_fd());
         assert!(msg_no_brs.flags().contains(MessageFlags::FD));
         assert!(msg_no_brs.flags().contains(MessageFlags::STD));
@@ -388,7 +366,7 @@ mod tests {
         assert!(!msg_no_brs.is_extended());
         assert_eq!(msg_no_brs.dlc(), 64);
 
-        let msg_brs = CanMessage::new_fd(0x100, &[2; 32], true, false).unwrap();
+        let msg_brs = CanMessage::new_fd(std(0x100), &[2; 32], Brs::On).unwrap();
         assert!(msg_brs.is_fd());
         assert!(msg_brs.flags().contains(MessageFlags::FD));
         assert!(msg_brs.flags().contains(MessageFlags::STD));
@@ -398,8 +376,8 @@ mod tests {
     }
 
     #[test]
-    fn new_fd_extended_sets_ext_flag() {
-        let msg = CanMessage::new_fd(0x1FFF_FFFF, &[0xAA; 16], true, true).unwrap();
+    fn new_fd_with_extended_id_sets_ext_flag() {
+        let msg = CanMessage::new_fd(ext(0x1FFF_FFFF), &[0xAA; 16], Brs::On).unwrap();
         assert!(msg.is_fd());
         assert!(msg.is_extended());
         assert!(msg.flags().contains(MessageFlags::EXT));
@@ -408,22 +386,12 @@ mod tests {
     }
 
     #[test]
-    fn new_fd_rejects_extended_id_without_extended_flag() {
-        assert!(CanMessage::new_fd(0x800, &[1, 2, 3], false, false).is_err());
-    }
-
-    #[test]
-    fn new_fd_extended_rejects_id_over_ext_max() {
-        assert!(CanMessage::new_fd(0x2000_0000, &[], false, true).is_err());
-    }
-
-    #[test]
     fn fd_dlc_rounds_up_to_valid_sizes() {
         // Exact valid sizes stay as-is
-        for &exact in &[0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64] {
-            let msg = CanMessage::new_fd(0x100, &vec![0xAA; exact], false, false).unwrap();
-            assert_eq!(msg.dlc() as usize, exact, "exact size {} should not change", exact);
-            assert_eq!(msg.data().len(), exact);
+        for &exact_size in &[0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64] {
+            let msg = CanMessage::new_fd(std(0x100), &vec![0xAA; exact_size], Brs::Off).unwrap();
+            assert_eq!(msg.dlc() as usize, exact_size, "exact size {} should not change", exact_size);
+            assert_eq!(msg.data().len(), exact_size);
         }
 
         // In-between sizes round up and zero-pad
@@ -438,7 +406,7 @@ mod tests {
         ];
         for &(input_len, expected_dlc) in cases {
             let data: Vec<u8> = (0..input_len as u8).collect();
-            let msg = CanMessage::new_fd(0x100, &data, false, false).unwrap();
+            let msg = CanMessage::new_fd(std(0x100), &data, Brs::Off).unwrap();
             assert_eq!(
                 msg.dlc() as usize, expected_dlc,
                 "input len {} should round up to {}", input_len, expected_dlc
@@ -491,8 +459,8 @@ mod tests {
     }
 
     #[test]
-    fn new_rtr_validation() {
-        let msg = CanMessage::new_rtr(0x100, 4).unwrap();
+    fn new_remote_standard() {
+        let msg = CanMessage::new_remote(std(0x100), 4).unwrap();
         assert!(msg.is_rtr());
         assert!(!msg.is_extended());
         assert_eq!(msg.id(), 0x100);
@@ -500,16 +468,13 @@ mod tests {
         assert_eq!(msg.data(), &[]);
         assert!(msg.flags().contains(MessageFlags::RTR));
         assert!(msg.flags().contains(MessageFlags::STD));
-
-        // Rejects invalid ID
-        assert!(CanMessage::new_rtr(0x800, 0).is_err());
         // Rejects invalid DLC
-        assert!(CanMessage::new_rtr(0x100, 9).is_err());
+        assert!(CanMessage::new_remote(std(0x100), 9).is_err());
     }
 
     #[test]
-    fn new_rtr_extended_validation() {
-        let msg = CanMessage::new_rtr_extended(0x1FFF_FFFF, 8).unwrap();
+    fn new_remote_extended() {
+        let msg = CanMessage::new_remote(ext(0x1FFF_FFFF), 8).unwrap();
         assert!(msg.is_rtr());
         assert!(msg.is_extended());
         assert_eq!(msg.id(), 0x1FFF_FFFF);
@@ -517,17 +482,14 @@ mod tests {
         assert_eq!(msg.data(), &[]);
         assert!(msg.flags().contains(MessageFlags::RTR));
         assert!(msg.flags().contains(MessageFlags::EXT));
-
-        // Rejects invalid ID
-        assert!(CanMessage::new_rtr_extended(0x2000_0000, 0).is_err());
         // Rejects invalid DLC
-        assert!(CanMessage::new_rtr_extended(0x100, 9).is_err());
+        assert!(CanMessage::new_remote(ext(0x1FFF_FFFF), 9).is_err());
     }
 
     #[test]
     fn pattern_match_variants() {
-        let data_msg = CanMessage::new(0x100, &[1, 2]).unwrap();
-        let rtr_msg = CanMessage::new_rtr(0x200, 4).unwrap();
+        let data_msg = CanMessage::new(std(0x100), &[1, 2]).unwrap();
+        let rtr_msg = CanMessage::new_remote(std(0x200), 4).unwrap();
         let error_msg = CanMessage::from_raw(0x0, vec![0xFF], 1, MessageFlags::ERROR_FRAME, 0);
 
         assert!(matches!(data_msg, CanMessage::Data(_)));
@@ -552,35 +514,20 @@ mod tests {
 
     #[test]
     fn empty_data_message() {
-        let msg = CanMessage::new(0x0, &[]).unwrap();
+        let msg = CanMessage::new(std(0x0), &[]).unwrap();
         assert_eq!(msg.dlc(), 0);
         assert!(msg.data().is_empty());
     }
 
     #[test]
-    fn new_rejects_id_over_std_max() {
-        assert!(CanMessage::new(0x800, &[]).is_err());
-        assert!(CanMessage::new(0xFFFF_FFFF, &[]).is_err());
-    }
-
-    #[test]
     fn new_rejects_data_over_8_bytes() {
-        assert!(CanMessage::new(0x100, &[0; 9]).is_err());
-    }
-
-    #[test]
-    fn new_extended_rejects_id_over_ext_max() {
-        assert!(CanMessage::new_extended(0x2000_0000, &[]).is_err());
-    }
-
-    #[test]
-    fn new_extended_rejects_data_over_8_bytes() {
-        assert!(CanMessage::new_extended(0x100, &[0; 9]).is_err());
+        assert!(CanMessage::new(std(0x100), &[0; 9]).is_err());
+        assert!(CanMessage::new(ext(0x100), &[0; 9]).is_err());
     }
 
     #[test]
     fn new_fd_rejects_data_over_64_bytes() {
-        assert!(CanMessage::new_fd(0x100, &[0; 65], false, false).is_err());
+        assert!(CanMessage::new_fd(std(0x100), &[0; 65], Brs::Off).is_err());
     }
 
     #[test]
@@ -589,5 +536,14 @@ mod tests {
         assert_eq!(msg.id(), 0xFFFF_FFFF);
         assert_eq!(msg.data().len(), 100);
         assert_eq!(msg.timestamp(), Some(12345));
+    }
+
+    #[test]
+    fn id_enum_input_works_directly() {
+        // Id::Standard / Id::Extended can be passed without unwrapping
+        let msg = CanMessage::new(Id::Standard(std(0x123)), &[1]).unwrap();
+        assert!(!msg.is_extended());
+        let msg = CanMessage::new(Id::Extended(ext(0x1F00_0001)), &[1]).unwrap();
+        assert!(msg.is_extended());
     }
 }

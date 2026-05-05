@@ -15,7 +15,10 @@
 //! cargo run --example can_fd_channel_setup
 //! ```
 
-use canlib::{Bitrate, CanError, CanMessage, Channel, DriverType, FdBitrate, MessageFlags, OpenFlags};
+use canlib::{
+    Bitrate, Brs, CanError, CanMessage, Channel, DriverType, ExtendedId, FdBitrate, MessageFlags,
+    OpenFlags, StandardId,
+};
 use std::time::Duration;
 
 // Arbitration phase: 500 kbit/s (classic CAN speed used for ID/control fields)
@@ -104,26 +107,30 @@ fn main() -> canlib::Result<()> {
     // -----------------------------------------------------------------------
     // Step 4: Send and receive CAN FD frames.
     //
-    // CanMessage::new_fd(id, data, brs, extended)
-    //   id       – CAN ID (11-bit standard or 29-bit extended)
-    //   data     – payload slice; up to 64 bytes for CAN FD
-    //   brs      – Bit Rate Switch: true  → data phase runs at DATA_BITRATE
-    //                                false → entire frame uses ARB_BITRATE
-    //   extended – true for 29-bit extended ID, false for 11-bit standard ID
+    // CanMessage::new_fd(id, data, brs)
+    //   id   – typed identifier (StandardId or ExtendedId); std/ext flag is
+    //          chosen by which type you pass.
+    //   data – payload slice; up to 64 bytes for CAN FD.
+    //   brs  – Brs::On switches to DATA_BITRATE during the data phase;
+    //          Brs::Off keeps the entire frame at the arbitration bitrate.
     // -----------------------------------------------------------------------
 
     // 4a. Short FD frame (8 bytes) without BRS, standard ID
-    let msg_8 = CanMessage::new_fd(0x100, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], false, false)?;
+    let msg_8 = CanMessage::new_fd(
+        StandardId::new(0x100).unwrap(),
+        &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+        Brs::Off,
+    )?;
     send_and_receive(&sender, &receiver, &msg_8, "8-byte FD, no BRS")?;
 
     // 4b. Medium FD frame (32 bytes) with BRS – data phase at 2 Mbit/s
     let data_32: Vec<u8> = (0u8..32).collect();
-    let msg_32 = CanMessage::new_fd(0x200, &data_32, true, false)?;
+    let msg_32 = CanMessage::new_fd(StandardId::new(0x200).unwrap(), &data_32, Brs::On)?;
     send_and_receive(&sender, &receiver, &msg_32, "32-byte FD, BRS")?;
 
     // 4c. Maximum FD frame (64 bytes) with BRS, extended ID
     let data_64: Vec<u8> = (0u8..64).collect();
-    let msg_64 = CanMessage::new_fd(0x1ABC_0300, &data_64, true, true)?;
+    let msg_64 = CanMessage::new_fd(ExtendedId::new(0x1ABC_0300).unwrap(), &data_64, Brs::On)?;
     send_and_receive(&sender, &receiver, &msg_64, "64-byte FD, BRS, extended ID")?;
 
     // -----------------------------------------------------------------------
