@@ -2,10 +2,11 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use canlib_sys as sys;
+use embedded_can::Id;
 
 use crate::bus_params::{Bitrate, BusParams, BusParamsTq, DriverType, FdBitrate};
 use crate::error::{check_handle, check_status, lib, CanError, Result};
-use crate::message::{CanMessage, MessageFlags, CANFD_MAX_DLC};
+use crate::message::{id_to_raw_and_flag, CanMessage, MessageFlags, CANFD_MAX_DLC};
 use crate::status::{BusStatistics, BusStatus, ErrorCounters};
 
 bitflags::bitflags! {
@@ -51,8 +52,8 @@ pub trait CanBusControl {
 pub trait CanRead {
     fn read(&self) -> Result<CanMessage>;
     fn read_wait(&self, timeout: Duration) -> Result<CanMessage>;
-    fn read_specific(&self, id: u32) -> Result<CanMessage>;
-    fn read_specific_skip(&self, id: u32) -> Result<CanMessage>;
+    fn read_specific(&self, id: Id) -> Result<CanMessage>;
+    fn read_specific_skip(&self, id: Id) -> Result<CanMessage>;
 }
 
 /// Write operations on a CAN channel.
@@ -97,8 +98,8 @@ macro_rules! impl_can_channel {
         impl CanRead for $type {
             fn read(&self) -> Result<CanMessage> { <$type>::read(self) }
             fn read_wait(&self, timeout: Duration) -> Result<CanMessage> { <$type>::read_wait(self, timeout) }
-            fn read_specific(&self, id: u32) -> Result<CanMessage> { <$type>::read_specific(self, id) }
-            fn read_specific_skip(&self, id: u32) -> Result<CanMessage> { <$type>::read_specific_skip(self, id) }
+            fn read_specific(&self, id: Id) -> Result<CanMessage> { <$type>::read_specific(self, id) }
+            fn read_specific_skip(&self, id: Id) -> Result<CanMessage> { <$type>::read_specific_skip(self, id) }
         }
 
         impl CanWrite for $type {
@@ -461,9 +462,12 @@ impl Channel {
 
     /// Read a message with a specific CAN ID.
     ///
+    /// CANLib's `canReadSpecific` matches on the raw integer value of the
+    /// identifier; the std/ext distinction in [`Id`] is informational here.
     /// Returns the next message matching `id`, or `Err(CanError::NoMsg)`.
-    pub fn read_specific(&self, id: u32) -> Result<CanMessage> {
+    pub fn read_specific(&self, id: Id) -> Result<CanMessage> {
         let l = lib()?;
+        let (raw, _) = id_to_raw_and_flag(id);
         let mut data = [0u8; CANFD_MAX_DLC];
         let mut dlc: u32 = 0;
         let mut flags: u32 = 0;
@@ -472,7 +476,7 @@ impl Channel {
         check_status(unsafe {
             (l.canReadSpecific)(
                 self.inner.raw(),
-                id as std::os::raw::c_long,
+                raw as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
                 &mut flags,
@@ -482,7 +486,7 @@ impl Channel {
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
         Ok(CanMessage::from_raw(
-            id,
+            raw,
             data[..data_len].to_vec(),
             dlc as u8,
             MessageFlags::from_bits_truncate(flags),
@@ -491,8 +495,9 @@ impl Channel {
     }
 
     /// Read a message with a specific ID, discarding non-matching messages.
-    pub fn read_specific_skip(&self, id: u32) -> Result<CanMessage> {
+    pub fn read_specific_skip(&self, id: Id) -> Result<CanMessage> {
         let l = lib()?;
+        let (raw, _) = id_to_raw_and_flag(id);
         let mut data = [0u8; CANFD_MAX_DLC];
         let mut dlc: u32 = 0;
         let mut flags: u32 = 0;
@@ -501,7 +506,7 @@ impl Channel {
         check_status(unsafe {
             (l.canReadSpecificSkip)(
                 self.inner.raw(),
-                id as std::os::raw::c_long,
+                raw as std::os::raw::c_long,
                 data.as_mut_ptr() as *mut std::os::raw::c_void,
                 &mut dlc,
                 &mut flags,
@@ -511,7 +516,7 @@ impl Channel {
 
         let data_len = (dlc as usize).min(CANFD_MAX_DLC);
         Ok(CanMessage::from_raw(
-            id,
+            raw,
             data[..data_len].to_vec(),
             dlc as u8,
             MessageFlags::from_bits_truncate(flags),
@@ -675,15 +680,16 @@ pub(crate) mod mock {
         fn read_wait(&self, _timeout: Duration) -> Result<CanMessage> {
             self.read()
         }
-        fn read_specific(&self, id: u32) -> Result<CanMessage> {
+        fn read_specific(&self, id: Id) -> Result<CanMessage> {
+            let (raw, _) = id_to_raw_and_flag(id);
             let mut q = self.rx_queue.borrow_mut();
-            let pos = q.iter().position(|m| m.id() == id);
+            let pos = q.iter().position(|m| m.id() == raw);
             match pos {
                 Some(i) => Ok(q.remove(i).unwrap()),
                 None => Err(CanError::NoMsg),
             }
         }
-        fn read_specific_skip(&self, id: u32) -> Result<CanMessage> {
+        fn read_specific_skip(&self, id: Id) -> Result<CanMessage> {
             self.read_specific(id)
         }
     }
@@ -739,7 +745,11 @@ pub(crate) mod mock {
         #[test]
         fn write_captures_to_tx_log() {
             let mock = MockChannel::new();
-            let msg = CanMessage::new(0x100, &[1, 2, 3]).unwrap();
+            let msg = CanMessage::new(
+                embedded_can::StandardId::new(0x100).unwrap(),
+                &[1, 2, 3],
+            )
+            .unwrap();
             CanWrite::write(&mock, &msg).unwrap();
             let log = mock.take_tx_log();
             assert_eq!(log.len(), 1);

@@ -111,28 +111,14 @@ pub fn decode_error_frame(flags: MessageFlags) -> ErrorKind {
 
 impl embedded_can::Frame for CanMessage {
     fn new(id: impl Into<embedded_can::Id>, data: &[u8]) -> Option<Self> {
-        match id.into() {
-            embedded_can::Id::Standard(s) => {
-                CanMessage::new(u32::from(s.as_raw()), data).ok()
-            }
-            embedded_can::Id::Extended(e) => {
-                CanMessage::new_extended(e.as_raw(), data).ok()
-            }
-        }
+        CanMessage::new(id, data).ok()
     }
 
     fn new_remote(id: impl Into<embedded_can::Id>, dlc: usize) -> Option<Self> {
         if dlc > CAN_MAX_DLC {
             return None;
         }
-        match id.into() {
-            embedded_can::Id::Standard(s) => {
-                CanMessage::new_rtr(u32::from(s.as_raw()), dlc as u8).ok()
-            }
-            embedded_can::Id::Extended(e) => {
-                CanMessage::new_rtr_extended(e.as_raw(), dlc as u8).ok()
-            }
-        }
+        CanMessage::new_remote(id, dlc as u8).ok()
     }
 
     fn is_extended(&self) -> bool {

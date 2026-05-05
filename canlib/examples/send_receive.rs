@@ -1,6 +1,6 @@
 //! Send and receive CAN messages on channel 0.
 
-use canlib::{Bitrate, CanError, CanMessage, Channel, DriverType, OpenFlags};
+use canlib::{Bitrate, CanError, CanMessage, Channel, DriverType, OpenFlags, StandardId};
 use std::time::Duration;
 
 fn main() -> canlib::Result<()> {
@@ -19,7 +19,8 @@ fn main() -> canlib::Result<()> {
     println!("On bus. Sending test message...");
 
     // Send a message
-    let msg = CanMessage::new(0x123, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])?;
+    let id = StandardId::new(0x123).unwrap();
+    let msg = CanMessage::new(id, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])?;
     ch.write(&msg)?;
     ch.write_sync(Duration::from_secs(1))?;
     println!("Sent: id=0x{:03X} data={:02X?}", msg.id(), msg.data());

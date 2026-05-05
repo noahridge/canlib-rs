@@ -44,7 +44,8 @@ fn main() -> canlib::Result<()> {
     ch.bus_on()?;
 
     // Send a message
-    let msg = CanMessage::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]);
+    let id = canlib::StandardId::new(0x123).unwrap();
+    let msg = CanMessage::new(id, &[0xDE, 0xAD, 0xBE, 0xEF])?;
     ch.write(&msg)?;
 
     // Receive a message (2 second timeout)
@@ -179,32 +180,45 @@ if ch.is_on_bus() {
 
 ### Creating Messages
 
+CAN identifiers are typed: pass a `StandardId` (11-bit, 0..=0x7FF) or
+an `ExtendedId` (29-bit, 0..=0x1FFF_FFFF) to choose the format. Both
+are re-exported from canlib for convenience.
+
 **Standard CAN (11-bit ID):**
 
 ```rust
-use canlib::CanMessage;
+use canlib::{CanMessage, StandardId};
 
-let msg = CanMessage::new(0x123, &[0x01, 0x02, 0x03]);
+let id = StandardId::new(0x123).unwrap();
+let msg = CanMessage::new(id, &[0x01, 0x02, 0x03]);
 ```
 
 **Extended CAN (29-bit ID):**
 
 ```rust
-let msg = CanMessage::new_extended(0x1ABCDEF, &[0x01, 0x02, 0x03]);
+use canlib::{CanMessage, ExtendedId};
+
+let id = ExtendedId::new(0x1ABCDEF).unwrap();
+let msg = CanMessage::new(id, &[0x01, 0x02, 0x03]);
 ```
 
 **CAN FD (up to 64 bytes, with optional Bit Rate Switch):**
 
 ```rust
+use canlib::{Brs, CanMessage, StandardId};
+
 let data: Vec<u8> = (0..32).collect();
-let msg = CanMessage::new_fd(0x456, &data, true, false); // brs=true, extended=false
+let id = StandardId::new(0x456).unwrap();
+let msg = CanMessage::new_fd(id, &data, Brs::On);
 ```
 
 **Remote Transmission Request (RTR):**
 
 ```rust
-let rtr = CanMessage::new_rtr(0x123, 4);          // Standard 11-bit ID, DLC=4
-let rtr_ext = CanMessage::new_rtr_extended(0x1ABCDEF, 8); // Extended 29-bit ID
+use canlib::{CanMessage, StandardId, ExtendedId};
+
+let rtr = CanMessage::new_remote(StandardId::new(0x123).unwrap(), 4);
+let rtr_ext = CanMessage::new_remote(ExtendedId::new(0x1ABCDEF).unwrap(), 8);
 ```
 
 **Inspecting a message:**
@@ -274,10 +288,11 @@ ch.read_sync(Duration::from_secs(5))?;
 let msg = ch.read()?;
 
 // Read only messages with a specific ID
-let msg = ch.read_specific(0x123)?;
+let id = canlib::StandardId::new(0x123).unwrap();
+let msg = ch.read_specific(id.into())?;
 
 // Read specific ID, discarding non-matching messages from the queue
-let msg = ch.read_specific_skip(0x123)?;
+let msg = ch.read_specific_skip(id.into())?;
 ```
 
 ### Acceptance Filters
@@ -357,8 +372,10 @@ ch.set_output_control(DriverType::Normal)?;
 ch.bus_on()?;
 
 // Send a CAN FD message with BRS
+use canlib::{Brs, StandardId};
 let data: Vec<u8> = (0..48).collect();
-let msg = CanMessage::new_fd(0x456, &data, true, false);
+let id = StandardId::new(0x456).unwrap();
+let msg = CanMessage::new_fd(id, &data, Brs::On)?;
 ch.write(&msg)?;
 ```
 
